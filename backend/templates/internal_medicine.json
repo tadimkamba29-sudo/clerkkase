@@ -1,0 +1,206 @@
+{
+  "rotation": "internal_medicine",
+  "version": "1.0",
+  "sections": [
+    {
+      "name": "demographics",
+      "title": "Patient Demographics",
+      "order": 1,
+      "required": true,
+      "fields": [
+        {"name": "name", "type": "text", "label": "Patient Name"},
+        {"name": "age", "type": "number", "label": "Age (years)"},
+        {"name": "dob", "type": "date", "label": "Date of Birth"},
+        {"name": "gender", "type": "select", "label": "Gender", "options": ["Male", "Female", "Other"]},
+        {"name": "nhs_number", "type": "text", "label": "NHS Number"},
+        {"name": "hospital_number", "type": "text", "label": "Hospital Number"},
+        {"name": "weight", "type": "number", "label": "Weight (kg)"},
+        {"name": "height", "type": "number", "label": "Height (cm)"}
+      ]
+    },
+    {
+      "name": "presenting_complaint",
+      "title": "Presenting Complaint",
+      "order": 2,
+      "required": true,
+      "fields": [
+        {"name": "complaint", "type": "textarea", "label": "Presenting Complaint"},
+        {"name": "duration", "type": "text", "label": "Duration"}
+      ]
+    },
+    {
+      "name": "history_presenting_complaint",
+      "title": "History of Presenting Complaint",
+      "order": 3,
+      "required": true,
+      "fields": [
+        {"name": "detailed_history", "type": "textarea", "label": "Detailed History"},
+        {"name": "symptoms", "type": "textarea", "label": "Associated Symptoms"},
+        {"name": "pain_assessment", "type": "textarea", "label": "Pain Assessment (SOCRATES)"},
+        {"name": "red_flags", "type": "textarea", "label": "Red Flags"}
+      ]
+    },
+    {
+      "name": "past_medical_history",
+      "title": "Past Medical History",
+      "order": 4,
+      "required": true,
+      "fields": [
+        {"name": "conditions", "type": "textarea", "label": "Previous Medical Conditions"},
+        {"name": "surgeries", "type": "textarea", "label": "Previous Surgeries"},
+        {"name": "hospital_admissions", "type": "textarea", "label": "Previous Hospital Admissions"},
+        {"name": "chronic_diseases", "type": "textarea", "label": "Chronic Diseases"}
+      ]
+    },
+    {
+      "name": "drug_history",
+      "title": "Drug History",
+      "order": 5,
+      "required": true,
+      "fields": [
+        {"name": "current_medications", "type": "textarea", "label": "Current Medications"},
+        {"name": "allergies", "type": "textarea", "label": "Drug Allergies"},
+        {"name": "adherence", "type": "textarea", "label": "Medication Adherence"},
+        {"name": "recent_changes", "type": "textarea", "label": "Recent Medication Changes"}
+      ]
+    },
+    {
+      "name": "family_history",
+      "title": "Family History",
+      "order": 6,
+      "required": true,
+      "fields": [
+        {"name": "cardiac_disease", "type": "textarea", "label": "Cardiac Disease"},
+        {"name": "diabetes", "type": "textarea", "label": "Diabetes"},
+        {"name": "malignancy", "type": "textarea", "label": "Malignancy"},
+        {"name": "genetic_conditions", "type": "textarea", "label": "Genetic Conditions"}
+      ]
+    },
+    {
+      "name": "social_history",
+      "title": "Social History",
+      "order": 7,
+      "required": true,
+      "fields": [
+        {"name": "occupation", "type": "text", "label": "Occupation"},
+        {"name": "smoking", "type": "textarea", "label": "Smoking History"},
+        {"name": "alcohol", "type": "textarea", "label": "Alcohol Consumption"},
+        {"name": "recreational_drugs", "type": "textarea", "label": "Recreational Drugs"},
+        {"name": "living_situation", "type": "textarea", "label": "Living Situation"},
+        {"name": "functional_status", "type": "textarea", "label": "Functional Status"}
+      ]
+    },
+    {
+      "name": "systems_review",
+      "title": "Systems Review",
+      "order": 8,
+      "required": true,
+      "fields": [
+        {"name": "general", "type": "textarea", "label": "General (fever, weight loss, fatigue)"},
+        {"name": "cardiovascular", "type": "textarea", "label": "Cardiovascular"},
+        {"name": "respiratory", "type": "textarea", "label": "Respiratory"},
+        {"name": "gastrointestinal", "type": "textarea", "label": "Gastrointestinal"},
+        {"name": "genitourinary", "type": "textarea", "label": "Genitourinary"},
+        {"name": "neurological", "type": "textarea", "label": "Neurological"},
+        {"name": "musculoskeletal", "type": "textarea", "label": "Musculoskeletal"},
+        {"name": "endocrine", "type": "textarea", "label": "Endocrine"},
+        {"name": "haematological", "type": "textarea", "label": "Haematological"}
+      ]
+    },
+    {
+      "name": "differential_diagnosis",
+      "title": "Differential Diagnosis",
+      "order": 9,
+      "required": true,
+      "fields": [
+        {"name": "working_diagnosis", "type": "textarea", "label": "Working Diagnosis"},
+        {"name": "differentials", "type": "textarea", "label": "Differential Diagnoses"},
+        {"name": "reasoning", "type": "textarea", "label": "Clinical Reasoning"}
+      ]
+    },
+    {
+      "name": "examination_findings",
+      "title": "Examination Findings",
+      "order": 10,
+      "required": true,
+      "fields": [
+        {"name": "general_appearance", "type": "textarea", "label": "General Appearance"},
+        {"name": "vital_signs", "type": "textarea", "label": "Vital Signs"},
+        {"name": "cardiovascular_exam", "type": "textarea", "label": "Cardiovascular Examination"},
+        {"name": "respiratory_exam", "type": "textarea", "label": "Respiratory Examination"},
+        {"name": "abdominal_exam", "type": "textarea", "label": "Abdominal Examination"},
+        {"name": "neurological_exam", "type": "textarea", "label": "Neurological Examination"},
+        {"name": "peripheral_exam", "type": "textarea", "label": "Peripheral Examination"}
+      ]
+    },
+    {
+      "name": "investigations",
+      "title": "Investigations",
+      "order": 11,
+      "required": true,
+      "fields": [
+        {"name": "bloods", "type": "textarea", "label": "Blood Tests"},
+        {"name": "imaging", "type": "textarea", "label": "Imaging"},
+        {"name": "ecg", "type": "textarea", "label": "ECG"},
+        {"name": "microbiology", "type": "textarea", "label": "Microbiology"},
+        {"name": "other_tests", "type": "textarea", "label": "Other Tests"}
+      ]
+    },
+    {
+      "name": "problem_list",
+      "title": "Problem List",
+      "order": 12,
+      "required": true,
+      "fields": [
+        {"name": "active_problems", "type": "textarea", "label": "Active Problems"},
+        {"name": "resolved_problems", "type": "textarea", "label": "Resolved Problems"},
+        {"name": "chronic_problems", "type": "textarea", "label": "Chronic Problems"}
+      ]
+    },
+    {
+      "name": "management_plan",
+      "title": "Management Plan",
+      "order": 13,
+      "required": true,
+      "fields": [
+        {"name": "immediate_management", "type": "textarea", "label": "Immediate Management"},
+        {"name": "medications", "type": "textarea", "label": "Medications"},
+        {"name": "monitoring", "type": "textarea", "label": "Monitoring Plan"},
+        {"name": "specialist_referral", "type": "textarea", "label": "Specialist Referral"}
+      ]
+    },
+    {
+      "name": "discharge_planning",
+      "title": "Discharge Planning",
+      "order": 14,
+      "required": true,
+      "fields": [
+        {"name": "discharge_criteria", "type": "textarea", "label": "Discharge Criteria"},
+        {"name": "follow_up", "type": "textarea", "label": "Follow-up Arrangements"},
+        {"name": "community_services", "type": "textarea", "label": "Community Services"}
+      ]
+    },
+    {
+      "name": "escalation_plan",
+      "title": "Escalation Plan",
+      "order": 15,
+      "required": true,
+      "fields": [
+        {"name": "resuscitation_status", "type": "select", "label": "Resuscitation Status", "options": ["CPR", "DNACPR", "Not Discussed"]},
+        {"name": "escalation_criteria", "type": "textarea", "label": "Escalation Criteria"},
+        {"name": "ceiling_of_care", "type": "textarea", "label": "Ceiling of Care"}
+      ]
+    },
+    {
+      "name": "summary_impression",
+      "title": "Summary and Clinical Impression",
+      "order": 16,
+      "required": true,
+      "fields": [
+        {"name": "summary", "type": "textarea", "label": "Case Summary"},
+        {"name": "clinical_impression", "type": "textarea", "label": "Clinical Impression"},
+        {"name": "learning_points", "type": "textarea", "label": "Learning Points"}
+      ]
+    }
+  ]
+}

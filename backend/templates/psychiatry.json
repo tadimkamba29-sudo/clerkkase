@@ -1,0 +1,262 @@
+{
+  "rotation": "psychiatry",
+  "version": "1.0",
+  "sections": [
+    {
+      "name": "demographics",
+      "title": "Patient Demographics",
+      "order": 1,
+      "required": true,
+      "fields": [
+        {"name": "name", "type": "text", "label": "Patient Name"},
+        {"name": "age", "type": "number", "label": "Age (years)"},
+        {"name": "dob", "type": "date", "label": "Date of Birth"},
+        {"name": "gender", "type": "select", "label": "Gender", "options": ["Male", "Female", "Other"]},
+        {"name": "nhs_number", "type": "text", "label": "NHS Number"},
+        {"name": "hospital_number", "type": "text", "label": "Hospital Number"},
+        {"name": "marital_status", "type": "select", "label": "Marital Status", "options": ["Single", "Married", "Divorced", "Widowed", "Partnered"]},
+        {"name": "occupation", "type": "text", "label": "Occupation"}
+      ]
+    },
+    {
+      "name": "presenting_complaint",
+      "title": "Presenting Complaint",
+      "order": 2,
+      "required": true,
+      "fields": [
+        {"name": "complaint", "type": "textarea", "label": "Presenting Complaint"},
+        {"name": "duration", "type": "text", "label": "Duration"},
+        {"name": "history_given_by", "type": "select", "label": "History Given By", "options": ["Patient", "Relative", "Carer", "Police", "Other"]}
+      ]
+    },
+    {
+      "name": "history_presenting_complaint",
+      "title": "History of Presenting Complaint",
+      "order": 3,
+      "required": true,
+      "fields": [
+        {"name": "detailed_history", "type": "textarea", "label": "Detailed History"},
+        {"name": "onset", "type": "textarea", "label": "Onset and Progression"},
+        {"name": "precipitating_factors", "type": "textarea", "label": "Precipitating Factors"},
+        {"name": "associated_symptoms", "type": "textarea", "label": "Associated Symptoms"},
+        {"name": "red_flags", "type": "textarea", "label": "Red Flags"}
+      ]
+    },
+    {
+      "name": "past_psychiatric_history",
+      "title": "Past Psychiatric History",
+      "order": 4,
+      "required": true,
+      "fields": [
+        {"name": "previous_diagnoses", "type": "textarea", "label": "Previous Diagnoses"},
+        {"name": "previous_admissions", "type": "textarea", "label": "Previous Admissions"},
+        {"name": "treatments", "type": "textarea", "label": "Previous Treatments"},
+        {"name": "medication_history", "type": "textarea", "label": "Psychiatric Medication History"},
+        {"name": "suicide_attempts", "type": "textarea", "label": "History of Self-Harm/Suicide Attempts"}
+      ]
+    },
+    {
+      "name": "past_medical_history",
+      "title": "Past Medical History",
+      "order": 5,
+      "required": true,
+      "fields": [
+        {"name": "physical_conditions", "type": "textarea", "label": "Physical Health Conditions"},
+        {"name": "neurological_conditions", "type": "textarea", "label": "Neurological Conditions"},
+        {"name": "surgeries", "type": "textarea", "label": "Previous Surgeries"},
+        {"name": "hospital_admissions", "type": "textarea", "label": "Previous Hospital Admissions"}
+      ]
+    },
+    {
+      "name": "drug_history",
+      "title": "Drug History",
+      "order": 6,
+      "required": true,
+      "fields": [
+        {"name": "current_medications", "type": "textarea", "label": "Current Medications"},
+        {"name": "psychiatric_medications", "type": "textarea", "label": "Psychiatric Medications"},
+        {"name": "allergies", "type": "textarea", "label": "Drug Allergies"},
+        {"name": "adherence", "type": "textarea", "label": "Medication Adherence"}
+      ]
+    },
+    {
+      "name": "family_history",
+      "title": "Family History",
+      "order": 7,
+      "required": true,
+      "fields": [
+        {"name": "psychiatric_conditions", "type": "textarea", "label": "Psychiatric Conditions in Family"},
+        {"name": "suicide_family", "type": "textarea", "label": "Family History of Suicide"},
+        {"name": "substance_use_family", "type": "textarea", "label": "Family Substance Use"},
+        {"name": "genetic_conditions", "type": "textarea", "label": "Genetic Conditions"}
+      ]
+    },
+    {
+      "name": "personal_history",
+      "title": "Personal History",
+      "order": 8,
+      "required": true,
+      "fields": [
+        {"name": "birth_early_development", "type": "textarea", "label": "Birth and Early Development"},
+        {"name": "education", "type": "textarea", "label": "Educational History"},
+        {"name": "employment", "type": "textarea", "label": "Employment History"},
+        {"name": "relationships", "type": "textarea", "label": "Relationships"},
+        {"name": "children", "type": "textarea", "label": "Children"},
+        {"name": "psychosexual_history", "type": "textarea", "label": "Psychosexual History"}
+      ]
+    },
+    {
+      "name": "substance_use",
+      "title": "Substance Use History",
+      "order": 9,
+      "required": true,
+      "fields": [
+        {"name": "alcohol", "type": "textarea", "label": "Alcohol Use (AUDIT-C)"},
+        {"name": "tobacco", "type": "textarea", "label": "Tobacco Use"},
+        {"name": "cannabis", "type": "textarea", "label": "Cannabis Use"},
+        {"name": "other_drugs", "type": "textarea", "label": "Other Substances"},
+        {"name": "substance_impact", "type": "textarea", "label": "Impact of Substance Use"}
+      ]
+    },
+    {
+      "name": "forensic_history",
+      "title": "Forensic History",
+      "order": 10,
+      "required": true,
+      "fields": [
+        {"name": "arrests", "type": "textarea", "label": "Arrests"},
+        {"name": "convictions", "type": "textarea", "label": "Convictions"},
+        {"name": "imprisonment", "type": "textarea", "label": "Imprisonment"},
+        {"name": "violent_offences", "type": "textarea", "label": "Violent Offences"},
+        {"name": "current_legal_issues", "type": "textarea", "label": "Current Legal Issues"}
+      ]
+    },
+    {
+      "name": "premorbid_personality",
+      "title": "Premorbid Personality",
+      "order": 11,
+      "required": true,
+      "fields": [
+        {"name": "personality_description", "type": "textarea", "label": "Personality Description"},
+        {"name": "coping_mechanisms", "type": "textarea", "label": "Coping Mechanisms"},
+        {"name": "interests_hobbies", "type": "textarea", "label": "Interests and Hobbies"},
+        {"name": "social_functioning", "type": "textarea", "label": "Social Functioning"}
+      ]
+    },
+    {
+      "name": "mental_state_examination",
+      "title": "Mental State Examination",
+      "order": 12,
+      "required": true,
+      "fields": [
+        {"name": "appearance_behaviour", "type": "textarea", "label": "Appearance and Behaviour"},
+        {"name": "speech", "type": "textarea", "label": "Speech"},
+        {"name": "mood", "type": "textarea", "label": "Mood"},
+        {"name": "affect", "type": "textarea", "label": "Affect"},
+        {"name": "thought_form", "type": "textarea", "label": "Thought Form"},
+        {"name": "thought_content", "type": "textarea", "label": "Thought Content"},
+        {"name": "perception", "type": "textarea", "label": "Perception"},
+        {"name": "cognition", "type": "textarea", "label": "Cognition"},
+        {"name": "insight", "type": "textarea", "label": "Insight"}
+      ]
+    },
+    {
+      "name": "risk_assessment",
+      "title": "Risk Assessment",
+      "order": 13,
+      "required": true,
+      "fields": [
+        {"name": "suicide_risk", "type": "textarea", "label": "Suicide Risk Assessment"},
+        {"name": "self_harm_risk", "type": "textarea", "label": "Self-Harm Risk"},
+        {"name": "violence_risk", "type": "textarea", "label": "Violence Risk"},
+        {"name": "vulnerability_risk", "type": "textarea", "label": "Vulnerability Risk"},
+        {"name": "safeguarding", "type": "textarea", "label": "Safeguarding Concerns"},
+        {"name": "protective_factors", "type": "textarea", "label": "Protective Factors"}
+      ]
+    },
+    {
+      "name": "physical_examination",
+      "title": "Physical Examination",
+      "order": 14,
+      "required": true,
+      "fields": [
+        {"name": "general_appearance", "type": "textarea", "label": "General Appearance"},
+        {"name": "vital_signs", "type": "textarea", "label": "Vital Signs"},
+        {"name": "neurological_exam", "type": "textarea", "label": "Neurological Examination"},
+        {"name": "physical_health_concerns", "type": "textarea", "label": "Physical Health Concerns"}
+      ]
+    },
+    {
+      "name": "investigations",
+      "title": "Investigations",
+      "order": 15,
+      "required": true,
+      "fields": [
+        {"name": "bloods", "type": "textarea", "label": "Blood Tests"},
+        {"name": "imaging", "type": "textarea", "label": "Imaging"},
+        {"name": "ecg", "type": "textarea", "label": "ECG"},
+        {"name": "cognitive_testing", "type": "textarea", "label": "Cognitive Testing"},
+        {"name": "other_tests", "type": "textarea", "label": "Other Tests"}
+      ]
+    },
+    {
+      "name": "formulation",
+      "title": "Formulation",
+      "order": 16,
+      "required": true,
+      "fields": [
+        {"name": "predisposing_factors", "type": "textarea", "label": "Predisposing Factors"},
+        {"name": "precipitating_factors", "type": "textarea", "label": "Precipitating Factors"},
+        {"name": "perpetuating_factors", "type": "textarea", "label": "Perpetuating Factors"},
+        {"name": "protective_factors", "type": "textarea", "label": "Protective Factors"}
+      ]
+    },
+    {
+      "name": "differential_diagnosis",
+      "title": "Differential Diagnosis",
+      "order": 17,
+      "required": true,
+      "fields": [
+        {"name": "working_diagnosis", "type": "textarea", "label": "Working Diagnosis"},
+        {"name": "differentials", "type": "textarea", "label": "Differential Diagnoses"},
+        {"name": "reasoning", "type": "textarea", "label": "Clinical Reasoning"}
+      ]
+    },
+    {
+      "name": "management_plan",
+      "title": "Management Plan",
+      "order": 18,
+      "required": true,
+      "fields": [
+        {"name": "immediate_management", "type": "textarea", "label": "Immediate Management"},
+        {"name": "medication", "type": "textarea", "label": "Medication Plan"},
+        {"name": "psychological_therapies", "type": "textarea", "label": "Psychological Therapies"},
+        {"name": "social_support", "type": "textarea", "label": "Social Support"},
+        {"name": "follow_up", "type": "textarea", "label": "Follow-up Arrangements"},
+        {"name": "safety_plan", "type": "textarea", "label": "Safety Plan"}
+      ]
+    },
+    {
+      "name": "capacity_consent",
+      "title": "Capacity and Consent",
+      "order": 19,
+      "required": true,
+      "fields": [
+        {"name": "mental_capacity", "type": "textarea", "label": "Mental Capacity Assessment"},
+        {"name": "consent", "type": "textarea", "label": "Consent Status"},
+        {"name": "mha_status", "type": "textarea", "label": "Mental Health Act Status"}
+      ]
+    },
+    {
+      "name": "summary_impression",
+      "title": "Summary and Clinical Impression",
+      "order": 20,
+      "required": true,
+      "fields": [
+        {"name": "summary", "type": "textarea", "label": "Case Summary"},
+        {"name": "clinical_impression", "type": "textarea", "label": "Clinical Impression"},
+        {"name": "learning_points", "type": "textarea", "label": "Learning Points"}
+      ]
+    }
+  ]
+}

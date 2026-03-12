@@ -1,0 +1,205 @@
+{
+  "rotation": "obstetrics_gynaecology",
+  "version": "1.0",
+  "sections": [
+    {
+      "name": "demographics",
+      "title": "Patient Demographics",
+      "order": 1,
+      "required": true,
+      "fields": [
+        {"name": "name", "type": "text", "label": "Patient Name"},
+        {"name": "age", "type": "number", "label": "Age (years)"},
+        {"name": "dob", "type": "date", "label": "Date of Birth"},
+        {"name": "nhs_number", "type": "text", "label": "NHS Number"},
+        {"name": "hospital_number", "type": "text", "label": "Hospital Number"},
+        {"name": "weight", "type": "number", "label": "Weight (kg)"},
+        {"name": "height", "type": "number", "label": "Height (cm)"},
+        {"name": "bmi", "type": "number", "label": "BMI"}
+      ]
+    },
+    {
+      "name": "presenting_complaint",
+      "title": "Presenting Complaint",
+      "order": 2,
+      "required": true,
+      "fields": [
+        {"name": "complaint", "type": "textarea", "label": "Presenting Complaint"},
+        {"name": "duration", "type": "text", "label": "Duration"},
+        {"name": "lmp", "type": "date", "label": "Last Menstrual Period"}
+      ]
+    },
+    {
+      "name": "history_presenting_complaint",
+      "title": "History of Presenting Complaint",
+      "order": 3,
+      "required": true,
+      "fields": [
+        {"name": "detailed_history", "type": "textarea", "label": "Detailed History"},
+        {"name": "symptoms", "type": "textarea", "label": "Associated Symptoms"},
+        {"name": "pain_assessment", "type": "textarea", "label": "Pain Assessment (SOCRATES)"},
+        {"name": "red_flags", "type": "textarea", "label": "Red Flags"}
+      ]
+    },
+    {
+      "name": "obstetric_history",
+      "title": "Obstetric History",
+      "order": 4,
+      "required": true,
+      "fields": [
+        {"name": "gravida", "type": "number", "label": "Gravida (G)"},
+        {"name": "para", "type": "number", "label": "Para (P)"},
+        {"name": "previous_pregnancies", "type": "textarea", "label": "Previous Pregnancies"},
+        {"name": "pregnancy_complications", "type": "textarea", "label": "Pregnancy Complications"},
+        {"name": "delivery_history", "type": "textarea", "label": "Delivery History"},
+        {"name": "neonatal_outcomes", "type": "textarea", "label": "Neonatal Outcomes"}
+      ],
+      "clarification_rules": {
+        "gravida": {
+          "missing": "What is the gravidity (total number of pregnancies)?"
+        },
+        "para": {
+          "missing": "What is the parity (number of births >24 weeks)?"
+        }
+      }
+    },
+    {
+      "name": "gynaecological_history",
+      "title": "Gynaecological History",
+      "order": 5,
+      "required": true,
+      "fields": [
+        {"name": "menarche", "type": "number", "label": "Age at Menarche"},
+        {"name": "cycle_regularity", "type": "textarea", "label": "Cycle Regularity"},
+        {"name": "menstrual_flow", "type": "textarea", "label": "Menstrual Flow"},
+        {"name": "dysmenorrhoea", "type": "select", "label": "Dysmenorrhoea", "options": ["Yes", "No"]},
+        {"name": "previous_sti", "type": "textarea", "label": "Previous STIs"},
+        {"name": "cervical_screening", "type": "textarea", "label": "Cervical Screening History"}
+      ]
+    },
+    {
+      "name": "contraceptive_history",
+      "title": "Contraceptive History",
+      "order": 6,
+      "required": true,
+      "fields": [
+        {"name": "current_contraception", "type": "textarea", "label": "Current Contraception"},
+        {"name": "previous_contraception", "type": "textarea", "label": "Previous Contraception"},
+        {"name": "contraceptive_complications", "type": "textarea", "label": "Contraceptive Complications"}
+      ]
+    },
+    {
+      "name": "past_medical_history",
+      "title": "Past Medical History",
+      "order": 7,
+      "required": true,
+      "fields": [
+        {"name": "conditions", "type": "textarea", "label": "Previous Medical Conditions"},
+        {"name": "surgeries", "type": "textarea", "label": "Previous Surgeries"},
+        {"name": "gynaecological_procedures", "type": "textarea", "label": "Gynaecological Procedures"}
+      ]
+    },
+    {
+      "name": "drug_history",
+      "title": "Drug History",
+      "order": 8,
+      "required": true,
+      "fields": [
+        {"name": "current_medications", "type": "textarea", "label": "Current Medications"},
+        {"name": "allergies", "type": "textarea", "label": "Drug Allergies"},
+        {"name": "folic_acid", "type": "select", "label": "Folic Acid", "options": ["Yes", "No"]},
+        {"name": "prenatal_vitamins", "type": "select", "label": "Prenatal Vitamins", "options": ["Yes", "No"]}
+      ]
+    },
+    {
+      "name": "social_history",
+      "title": "Social History",
+      "order": 9,
+      "required": true,
+      "fields": [
+        {"name": "occupation", "type": "text", "label": "Occupation"},
+        {"name": "smoking", "type": "textarea", "label": "Smoking History"},
+        {"name": "alcohol", "type": "textarea", "label": "Alcohol Consumption"},
+        {"name": "substance_use", "type": "textarea", "label": "Substance Use"},
+        {"name": "domestic_violence_screening", "type": "textarea", "label": "Domestic Violence Screening"},
+        {"name": "support_system", "type": "textarea", "label": "Support System"}
+      ]
+    },
+    {
+      "name": "family_history",
+      "title": "Family History",
+      "order": 10,
+      "required": true,
+      "fields": [
+        {"name": "genetic_conditions", "type": "textarea", "label": "Genetic Conditions"},
+        {"name": "pregnancy_complications", "type": "textarea", "label": "Family Pregnancy Complications"},
+        {"name": "gynaecological_cancer", "type": "textarea", "label": "Gynaecological Cancer"},
+        {"name": "thrombophilia", "type": "textarea", "label": "Thrombophilia"}
+      ]
+    },
+    {
+      "name": "current_pregnancy",
+      "title": "Current Pregnancy (if applicable)",
+      "order": 11,
+      "required": false,
+      "fields": [
+        {"name": "gestation", "type": "text", "label": "Current Gestation"},
+        {"name": "edd", "type": "date", "label": "Estimated Due Date"},
+        {"name": "antenatal_care", "type": "textarea", "label": "Antenatal Care"},
+        {"name": "pregnancy_complications", "type": "textarea", "label": "Current Pregnancy Complications"},
+        {"name": "fetal_movement", "type": "textarea", "label": "Fetal Movement"}
+      ]
+    },
+    {
+      "name": "examination_findings",
+      "title": "Examination Findings",
+      "order": 12,
+      "required": true,
+      "fields": [
+        {"name": "general_appearance", "type": "textarea", "label": "General Appearance"},
+        {"name": "vital_signs", "type": "textarea", "label": "Vital Signs"},
+        {"name": "abdominal_exam", "type": "textarea", "label": "Abdominal Examination"},
+        {"name": "pelvic_exam", "type": "textarea", "label": "Pelvic Examination"},
+        {"name": "breast_exam", "type": "textarea", "label": "Breast Examination"},
+        {"name": "fundal_height", "type": "text", "label": "Fundal Height (if pregnant)"}
+      ]
+    },
+    {
+      "name": "investigations",
+      "title": "Investigations",
+      "order": 13,
+      "required": true,
+      "fields": [
+        {"name": "bloods", "type": "textarea", "label": "Blood Tests"},
+        {"name": "imaging", "type": "textarea", "label": "Imaging"},
+        {"name": "microbiology", "type": "textarea", "label": "Microbiology"},
+        {"name": "cervical_cytology", "type": "textarea", "label": "Cervical Cytology"},
+        {"name": "other_tests", "type": "textarea", "label": "Other Tests"}
+      ]
+    },
+    {
+      "name": "differential_diagnosis",
+      "title": "Differential Diagnosis",
+      "order": 14,
+      "required": true,
+      "fields": [
+        {"name": "working_diagnosis", "type": "textarea", "label": "Working Diagnosis"},
+        {"name": "differentials", "type": "textarea", "label": "Differential Diagnoses"},
+        {"name": "reasoning", "type": "textarea", "label": "Clinical Reasoning"}
+      ]
+    },
+    {
+      "name": "management_plan",
+      "title": "Management Plan",
+      "order": 15,
+      "required": true,
+      "fields": [
+        {"name": "immediate_management", "type": "textarea", "label": "Immediate Management"},
+        {"name": "medications", "type": "textarea", "label": "Medications"},
+        {"name": "monitoring", "type": "textarea", "label": "Monitoring Plan"},
+        {"name": "follow_up", "type": "textarea", "label": "Follow-up Arrangements"},
+        {"name": "safety_netting", "type": "textarea", "label": "Safety Netting Advice"}
+      ]
+    }
+  ]
+}

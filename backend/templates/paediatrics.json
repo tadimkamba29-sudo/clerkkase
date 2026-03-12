@@ -1,0 +1,278 @@
+{
+  "rotation": "paediatrics",
+  "version": "1.0",
+  "sections": [
+    {
+      "name": "demographics",
+      "title": "Patient Demographics",
+      "order": 1,
+      "required": true,
+      "fields": [
+        {"name": "name", "type": "text", "label": "Patient Name"},
+        {"name": "age", "type": "number", "label": "Age (years)"},
+        {"name": "dob", "type": "date", "label": "Date of Birth"},
+        {"name": "gender", "type": "select", "label": "Gender", "options": ["Male", "Female", "Other"]},
+        {"name": "weight", "type": "number", "label": "Weight (kg)"},
+        {"name": "height", "type": "number", "label": "Height (cm)"},
+        {"name": "nhs_number", "type": "text", "label": "NHS Number"},
+        {"name": "hospital_number", "type": "text", "label": "Hospital Number"}
+      ],
+      "clarification_rules": {
+        "age": {
+          "missing": "What is the patient's age?",
+          "invalid": "Please provide a valid age between 0 and 18 years for paediatrics."
+        },
+        "weight": {
+          "missing": "What is the patient's current weight?"
+        }
+      }
+    },
+    {
+      "name": "presenting_complaint",
+      "title": "Presenting Complaint",
+      "order": 2,
+      "required": true,
+      "fields": [
+        {"name": "complaint", "type": "textarea", "label": "Presenting Complaint"},
+        {"name": "duration", "type": "text", "label": "Duration"},
+        {"name": "history_given_by", "type": "select", "label": "History Given By", "options": ["Patient", "Parent", "Carer", "Relative", "Paramedic"]}
+      ],
+      "clarification_rules": {
+        "complaint": {
+          "missing": "What is the main reason for the patient's presentation today?"
+        },
+        "duration": {
+          "missing": "How long has this problem been present?"
+        }
+      }
+    },
+    {
+      "name": "history_presenting_complaint",
+      "title": "History of Presenting Complaint",
+      "order": 3,
+      "required": true,
+      "fields": [
+        {"name": "detailed_history", "type": "textarea", "label": "Detailed History"},
+        {"name": "symptoms", "type": "textarea", "label": "Associated Symptoms"},
+        {"name": "pain_assessment", "type": "textarea", "label": "Pain Assessment (SOCRATES)"},
+        {"name": "red_flags", "type": "textarea", "label": "Red Flags"}
+      ],
+      "clarification_rules": {
+        "pain_assessment": {
+          "missing": "Has the patient reported any pain? If so, please assess using SOCRATES."
+        }
+      }
+    },
+    {
+      "name": "past_medical_history",
+      "title": "Past Medical History",
+      "order": 4,
+      "required": true,
+      "fields": [
+        {"name": "conditions", "type": "textarea", "label": "Previous Medical Conditions"},
+        {"name": "surgeries", "type": "textarea", "label": "Previous Surgeries"},
+        {"name": "hospital_admissions", "type": "textarea", "label": "Previous Hospital Admissions"},
+        {"name": "chronic_conditions", "type": "textarea", "label": "Chronic Conditions"}
+      ]
+    },
+    {
+      "name": "drug_history",
+      "title": "Drug History",
+      "order": 5,
+      "required": true,
+      "fields": [
+        {"name": "current_medications", "type": "textarea", "label": "Current Medications"},
+        {"name": "allergies", "type": "textarea", "label": "Drug Allergies"},
+        {"name": "adverse_reactions", "type": "textarea", "label": "Adverse Drug Reactions"},
+        {"name": "recent_antibiotics", "type": "textarea", "label": "Recent Antibiotics"}
+      ],
+      "clarification_rules": {
+        "allergies": {
+          "missing": "Does the patient have any known drug allergies? Please specify."
+        }
+      }
+    },
+    {
+      "name": "family_history",
+      "title": "Family History",
+      "order": 6,
+      "required": true,
+      "fields": [
+        {"name": "genetic_conditions", "type": "textarea", "label": "Genetic Conditions"},
+        {"name": "chronic_diseases", "type": "textarea", "label": "Chronic Diseases in Family"},
+        {"name": "sibling_health", "type": "textarea", "label": "Sibling Health Status"},
+        {"name": "consanguinity", "type": "select", "label": "Consanguinity", "options": ["Yes", "No", "Unknown"]}
+      ]
+    },
+    {
+      "name": "social_history",
+      "title": "Social History",
+      "order": 7,
+      "required": true,
+      "fields": [
+        {"name": "living_situation", "type": "textarea", "label": "Living Situation"},
+        {"name": "school_attendance", "type": "textarea", "label": "School/Nursery Attendance"},
+        {"name": "household_members", "type": "textarea", "label": "Household Members"},
+        {"name": "smoking_exposure", "type": "select", "label": "Smoking Exposure", "options": ["Yes", "No", "Unknown"]},
+        {"name": "pets", "type": "textarea", "label": "Pets at Home"},
+        {"name": "recent_travel", "type": "textarea", "label": "Recent Travel"}
+      ]
+    },
+    {
+      "name": "birth_history",
+      "title": "Birth History",
+      "order": 8,
+      "required": true,
+      "fields": [
+        {"name": "gestation", "type": "text", "label": "Gestation at Birth"},
+        {"name": "delivery_mode", "type": "select", "label": "Mode of Delivery", "options": ["Spontaneous vaginal", "Forceps", "Ventouse", "Elective Caesarean", "Emergency Caesarean", "Unknown"]},
+        {"name": "birth_weight", "type": "number", "label": "Birth Weight (g)"},
+        {"name": "neonatal_complications", "type": "textarea", "label": "Neonatal Complications"},
+        {"name": "apgar_scores", "type": "text", "label": "Apgar Scores"},
+        {"name": "jaundice", "type": "select", "label": "Neonatal Jaundice", "options": ["Yes", "No", "Unknown"]}
+      ],
+      "clarification_rules": {
+        "gestation": {
+          "missing": "What was the gestational age at birth?"
+        },
+        "birth_weight": {
+          "missing": "What was the birth weight?"
+        }
+      }
+    },
+    {
+      "name": "feeding_nutrition",
+      "title": "Feeding and Nutrition",
+      "order": 9,
+      "required": true,
+      "fields": [
+        {"name": "current_feeding", "type": "textarea", "label": "Current Feeding"},
+        {"name": "breastfeeding_history", "type": "textarea", "label": "Breastfeeding History"},
+        {"name": "formula_type", "type": "text", "label": "Formula Type (if applicable)"},
+        {"name": "weaning_status", "type": "textarea", "label": "Weaning Status"},
+        {"name": "dietary_restrictions", "type": "textarea", "label": "Dietary Restrictions"}
+      ]
+    },
+    {
+      "name": "developmental_history",
+      "title": "Developmental History",
+      "order": 10,
+      "required": true,
+      "fields": [
+        {"name": "gross_motor", "type": "textarea", "label": "Gross Motor Milestones"},
+        {"name": "fine_motor", "type": "textarea", "label": "Fine Motor Milestones"},
+        {"name": "speech_language", "type": "textarea", "label": "Speech and Language"},
+        {"name": "social_emotional", "type": "textarea", "label": "Social and Emotional"},
+        {"name": "concerns", "type": "textarea", "label": "Developmental Concerns"}
+      ]
+    },
+    {
+      "name": "immunisation_history",
+      "title": "Immunisation History",
+      "order": 11,
+      "required": true,
+      "fields": [
+        {"name": "up_to_date", "type": "select", "label": "Immunisations Up to Date", "options": ["Yes", "No", "Partial", "Unknown"]},
+        {"name": "missing_vaccines", "type": "textarea", "label": "Missing Vaccines"},
+        {"name": "vaccine_reactions", "type": "textarea", "label": "Vaccine Reactions"},
+        {"name": "recent_vaccines", "type": "textarea", "label": "Recent Vaccines"}
+      ],
+      "clarification_rules": {
+        "up_to_date": {
+          "missing": "Are the patient's immunisations up to date?"
+        }
+      }
+    },
+    {
+      "name": "systems_review",
+      "title": "Systems Review",
+      "order": 12,
+      "required": true,
+      "fields": [
+        {"name": "general", "type": "textarea", "label": "General (fever, weight loss, fatigue)"},
+        {"name": "respiratory", "type": "textarea", "label": "Respiratory"},
+        {"name": "cardiovascular", "type": "textarea", "label": "Cardiovascular"},
+        {"name": "gastrointestinal", "type": "textarea", "label": "Gastrointestinal"},
+        {"name": "genitourinary", "type": "textarea", "label": "Genitourinary"},
+        {"name": "neurological", "type": "textarea", "label": "Neurological"},
+        {"name": "musculoskeletal", "type": "textarea", "label": "Musculoskeletal"},
+        {"name": "skin", "type": "textarea", "label": "Skin"}
+      ]
+    },
+    {
+      "name": "differential_diagnosis",
+      "title": "Differential Diagnosis",
+      "order": 13,
+      "required": true,
+      "fields": [
+        {"name": "working_diagnosis", "type": "textarea", "label": "Working Diagnosis"},
+        {"name": "differentials", "type": "textarea", "label": "Differential Diagnoses"},
+        {"name": "reasoning", "type": "textarea", "label": "Clinical Reasoning"}
+      ]
+    },
+    {
+      "name": "examination_findings",
+      "title": "Examination Findings",
+      "order": 14,
+      "required": true,
+      "fields": [
+        {"name": "general_appearance", "type": "textarea", "label": "General Appearance"},
+        {"name": "vital_signs", "type": "textarea", "label": "Vital Signs"},
+        {"name": "cardiovascular_exam", "type": "textarea", "label": "Cardiovascular Examination"},
+        {"name": "respiratory_exam", "type": "textarea", "label": "Respiratory Examination"},
+        {"name": "abdominal_exam", "type": "textarea", "label": "Abdominal Examination"},
+        {"name": "neurological_exam", "type": "textarea", "label": "Neurological Examination"},
+        {"name": "ent_exam", "type": "textarea", "label": "ENT Examination"},
+        {"name": "skin_exam", "type": "textarea", "label": "Skin Examination"}
+      ]
+    },
+    {
+      "name": "investigations",
+      "title": "Investigations",
+      "order": 15,
+      "required": true,
+      "fields": [
+        {"name": "bloods", "type": "textarea", "label": "Blood Tests"},
+        {"name": "imaging", "type": "textarea", "label": "Imaging"},
+        {"name": "microbiology", "type": "textarea", "label": "Microbiology"},
+        {"name": "other_tests", "type": "textarea", "label": "Other Tests"}
+      ]
+    },
+    {
+      "name": "management_plan",
+      "title": "Management Plan",
+      "order": 16,
+      "required": true,
+      "fields": [
+        {"name": "immediate_management", "type": "textarea", "label": "Immediate Management"},
+        {"name": "medications", "type": "textarea", "label": "Medications"},
+        {"name": "monitoring", "type": "textarea", "label": "Monitoring Plan"},
+        {"name": "discharge_plan", "type": "textarea", "label": "Discharge Plan"},
+        {"name": "follow_up", "type": "textarea", "label": "Follow-up Arrangements"}
+      ]
+    },
+    {
+      "name": "escalation_safety_netting",
+      "title": "Escalation and Safety Netting",
+      "order": 17,
+      "required": true,
+      "fields": [
+        {"name": "red_flags_given", "type": "textarea", "label": "Red Flags Discussed"},
+        {"name": "when_to_return", "type": "textarea", "label": "When to Return"},
+        {"name": "emergency_signs", "type": "textarea", "label": "Emergency Signs"},
+        {"name": "contact_information", "type": "textarea", "label": "Contact Information"}
+      ]
+    },
+    {
+      "name": "summary_impression",
+      "title": "Summary and Clinical Impression",
+      "order": 18,
+      "required": true,
+      "fields": [
+        {"name": "summary", "type": "textarea", "label": "Case Summary"},
+        {"name": "clinical_impression", "type": "textarea", "label": "Clinical Impression"},
+        {"name": "learning_points", "type": "textarea", "label": "Learning Points"}
+      ]
+    }
+  ]
+}
