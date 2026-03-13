@@ -1,27 +1,10 @@
-# ============================================================
-# ClerKase Backend Dependencies
-# ============================================================
-
-# Web Framework
 Flask==3.0.0
 Flask-CORS==4.0.0
-
-# Environment
 python-dotenv==1.0.1
-
-# Database (SQLite used by default; swap DATABASE_URL for PostgreSQL)
 SQLAlchemy==2.0.23
 alembic==1.13.1
-# psycopg2-binary is only needed when DATABASE_URL points to PostgreSQL.
-# Omitted here because it requires OS-level libs that may not be available
-# in all serverless environments. Add it back if you connect to PostgreSQL.
-
-# Authentication
+pg8000==1.31.2
 PyJWT==2.8.0
 bcrypt==4.1.2
-
-# AI Integration
 anthropic==0.18.1
-
-# Document Generation
 python-docx==1.1.0
