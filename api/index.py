@@ -410,9 +410,9 @@ def get_section_template(rotation_id, section_name):
 # ============================================================================
 
 @app.route("/api/cases", methods=["POST"])
-@login_required
+@optional_auth
 def create_case():
-    """Create a new clerking case (requires authentication)."""
+    """Create a new clerking case. Works with or without authentication."""
     sm = _require(state_manager, "state_manager")
     data = request.get_json()
     if not data:
@@ -423,10 +423,11 @@ def create_case():
         return jsonify({"error": "rotation is required"}), 400
 
     try:
-        case = state_manager.create_case(rotation)
+        case = sm.create_case(rotation)
 
-        # Attach case to the authenticated user
-        _link_case_to_user(case["case_id"], g.current_user["user_id"])
+        # Link to user if authenticated
+        if g.current_user:
+            _link_case_to_user(case["case_id"], g.current_user["user_id"])
 
         return jsonify({
             "message": "Case created successfully",
@@ -481,9 +482,9 @@ def get_case(case_id):
 
 
 @app.route("/api/cases/<case_id>", methods=["DELETE"])
-@login_required
+@optional_auth
 def delete_case(case_id):
-    if not _user_owns_case(case_id, g.current_user["user_id"]):
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
         return jsonify({"error": "Access denied"}), 403
 
     success = state_manager.delete_case(case_id)
