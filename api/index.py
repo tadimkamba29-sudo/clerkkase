@@ -1,45 +1,66 @@
 """
-Flask API for ClerKase
-Main application entry point
+Flask API for ClerKase — main application entry point.
+
+Changes from Kimi original
+--------------------------
+1. Auth routes added  : POST /api/auth/register
+                        POST /api/auth/login
+                        POST /api/auth/refresh
+                        GET  /api/auth/me
+2. @login_required    : create_case, delete_case
+3. @optional_auth     : list_cases (scopes to user when token present)
+4. Dict access        : case_state is now a plain dict (from our new
+                        StateManager._to_proxy), so all .attr access
+                        has been changed to ["key"] access throughout.
 """
 
 import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from datetime import datetime, timedelta
-from functools import wraps
 
-from flask import Flask, request, jsonify
+from datetime import datetime
+
+from flask import Flask, g, jsonify, request, send_file
 from flask_cors import CORS
 from dotenv import load_dotenv
 
-# Load environment variables
 load_dotenv()
 
-# Import components
-from state_manager import get_state_manager, SectionStatus
+# ── App components ────────────────────────────────────────────────────────────
+from state_manager import get_state_manager
 from input_parser import get_input_parser
 from clarification_engine import get_clarification_engine
 from document_compiler import get_document_compiler
+from database import init_db, SessionLocal, User, SectionStatus
+from auth import (
+    hash_password,
+    verify_password,
+    validate_password_strength,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    extract_bearer_token,
+    login_required,
+    optional_auth,
+)
 
-# Create Flask app
+# ── Flask setup ───────────────────────────────────────────────────────────────
 app = Flask(__name__)
-app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key')
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-key")
 
-# Enable CORS
 CORS(app, resources={
     r"/api/*": {
         "origins": ["*"],
         "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        "allow_headers": ["Content-Type", "Authorization"]
+        "allow_headers": ["Content-Type", "Authorization"],
     }
 })
 
-# Initialize components
+# ── Initialise singletons ─────────────────────────────────────────────────────
 state_manager = get_state_manager()
 input_parser = get_input_parser()
 clarification_engine = get_clarification_engine(use_ai=True)
-document_compiler = get_document_compiler('/tmp/exports')
+document_compiler = get_document_compiler("/tmp/exports")
 
 
 # ============================================================================
@@ -60,24 +81,21 @@ def internal_error(error):
 
 
 # ============================================================================
-# HEALTH & STATUS ENDPOINTS
+# HEALTH & STATUS
 # ============================================================================
 
-@app.route('/api/health', methods=['GET'])
+@app.route("/api/health", methods=["GET"])
 def health_check():
-    """Health check endpoint"""
     return jsonify({
         "status": "healthy",
         "timestamp": datetime.utcnow().isoformat(),
-        "version": "1.0.0"
+        "version": "1.0.0",
     })
 
 
-@app.route('/api/status', methods=['GET'])
+@app.route("/api/status", methods=["GET"])
 def system_status():
-    """Get system status"""
     ai_status = clarification_engine.get_ai_status()
-    
     return jsonify({
         "status": "operational",
         "timestamp": datetime.utcnow().isoformat(),
@@ -86,21 +104,175 @@ def system_status():
             "input_parser": "active",
             "clarification_engine": "active",
             "ai_clarifier": ai_status,
-            "document_compiler": "active"
+            "document_compiler": "active",
         },
-        "available_rotations": state_manager.get_available_rotations()
+        "available_rotations": state_manager.get_available_rotations(),
     })
 
 
 # ============================================================================
-# ROTATION ENDPOINTS
+# AUTHENTICATION ROUTES
 # ============================================================================
 
-@app.route('/api/rotations', methods=['GET'])
+@app.route("/api/auth/register", methods=["POST"])
+def register():
+    """Register a new student account."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    email = (data.get("email") or "").strip().lower()
+    username = (data.get("username") or "").strip()
+    password = data.get("password") or ""
+    full_name = (data.get("full_name") or "").strip() or None
+    institution = (data.get("institution") or "").strip() or None
+
+    # Basic field validation
+    if not email or "@" not in email:
+        return jsonify({"error": "Valid email is required"}), 400
+    if not username or len(username) < 3:
+        return jsonify({"error": "Username must be at least 3 characters"}), 400
+
+    # Password strength
+    ok, reason = validate_password_strength(password)
+    if not ok:
+        return jsonify({"error": reason}), 400
+
+    db = SessionLocal()
+    try:
+        # Uniqueness checks
+        if db.query(User).filter(User.email == email).first():
+            return jsonify({"error": "An account with this email already exists"}), 409
+        if db.query(User).filter(User.username == username).first():
+            return jsonify({"error": "Username is already taken"}), 409
+
+        user = User(
+            email=email,
+            username=username,
+            hashed_password=hash_password(password),
+            full_name=full_name,
+            institution=institution,
+            is_active=True,
+            is_verified=False,
+        )
+        db.add(user)
+        db.commit()
+        db.refresh(user)
+
+        access_token = create_access_token(user.id, user.email, user.username)
+        refresh_token = create_refresh_token(user.id)
+
+        return jsonify({
+            "message": "Account created successfully",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "user": user.to_dict(),
+        }), 201
+
+    except Exception as e:
+        db.rollback()
+        return jsonify({"error": f"Registration failed: {str(e)}"}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def login():
+    """Log in with email + password, receive JWT tokens."""
+    data = request.get_json()
+    if not data:
+        return jsonify({"error": "Request body required"}), 400
+
+    email = (data.get("email") or "").strip().lower()
+    password = data.get("password") or ""
+
+    if not email or not password:
+        return jsonify({"error": "Email and password are required"}), 400
+
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.email == email).first()
+
+        # Generic message — do not reveal whether email exists
+        if not user or not verify_password(password, user.hashed_password):
+            return jsonify({"error": "Invalid email or password"}), 401
+
+        if not user.is_active:
+            return jsonify({"error": "Account is deactivated. Please contact support."}), 403
+
+        # Update last login
+        user.last_login = datetime.utcnow()
+        db.commit()
+
+        access_token = create_access_token(user.id, user.email, user.username)
+        refresh_token = create_refresh_token(user.id)
+
+        return jsonify({
+            "message": "Login successful",
+            "access_token": access_token,
+            "refresh_token": refresh_token,
+            "user": user.to_dict(),
+        })
+
+    except Exception as e:
+        return jsonify({"error": f"Login failed: {str(e)}"}), 500
+    finally:
+        db.close()
+
+
+@app.route("/api/auth/refresh", methods=["POST"])
+def refresh_token():
+    """Exchange a refresh token for a new access token."""
+    data = request.get_json()
+    token = (data or {}).get("refresh_token") or extract_bearer_token(
+        request.headers.get("Authorization")
+    )
+
+    if not token:
+        return jsonify({"error": "Refresh token required"}), 400
+
+    payload = decode_token(token)
+    if not payload or payload.get("type") != "refresh":
+        return jsonify({"error": "Invalid or expired refresh token"}), 401
+
+    user_id = int(payload["sub"])
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user or not user.is_active:
+            return jsonify({"error": "User not found or inactive"}), 401
+
+        new_access = create_access_token(user.id, user.email, user.username)
+        return jsonify({
+            "access_token": new_access,
+            "message": "Token refreshed successfully",
+        })
+
+    finally:
+        db.close()
+
+
+@app.route("/api/auth/me", methods=["GET"])
+@login_required
+def get_current_user():
+    """Return the authenticated user's profile."""
+    db = SessionLocal()
+    try:
+        user = db.query(User).filter(User.id == g.current_user["user_id"]).first()
+        if not user:
+            return jsonify({"error": "User not found"}), 404
+        return jsonify({"user": user.to_dict()})
+    finally:
+        db.close()
+
+
+# ============================================================================
+# ROTATION ENDPOINTS  (public — no auth needed)
+# ============================================================================
+
+@app.route("/api/rotations", methods=["GET"])
 def get_rotations():
-    """Get all available rotations"""
     rotations = state_manager.get_available_rotations()
-    
     rotation_list = []
     for rotation in rotations:
         template = state_manager.get_template(rotation)
@@ -109,24 +281,17 @@ def get_rotations():
                 "id": rotation,
                 "name": rotation.replace("_", " ").title(),
                 "section_count": len(template.get("sections", [])),
-                "version": template.get("version", "1.0")
+                "version": template.get("version", "1.0"),
             })
-    
-    return jsonify({
-        "rotations": rotation_list
-    })
+    return jsonify({"rotations": rotation_list})
 
 
-@app.route('/api/rotations/<rotation_id>', methods=['GET'])
+@app.route("/api/rotations/<rotation_id>", methods=["GET"])
 def get_rotation_detail(rotation_id):
-    """Get detailed information about a rotation"""
     template = state_manager.get_template(rotation_id)
-    
     if not template:
         return jsonify({"error": "Rotation not found"}), 404
-    
     sections = sorted(template.get("sections", []), key=lambda s: s.get("order", 999))
-    
     return jsonify({
         "id": rotation_id,
         "name": rotation_id.replace("_", " ").title(),
@@ -137,221 +302,216 @@ def get_rotation_detail(rotation_id):
                 "title": s.get("title"),
                 "order": s.get("order"),
                 "required": s.get("required", True),
-                "field_count": len(s.get("fields", []))
+                "field_count": len(s.get("fields", [])),
             }
             for s in sections
-        ]
+        ],
     })
 
 
-@app.route('/api/rotations/<rotation_id>/template', methods=['GET'])
+@app.route("/api/rotations/<rotation_id>/template", methods=["GET"])
 def get_rotation_template(rotation_id):
-    """Get full template for a rotation"""
     template = state_manager.get_template(rotation_id)
-    
     if not template:
         return jsonify({"error": "Rotation not found"}), 404
-    
     return jsonify(template)
 
 
-@app.route('/api/rotations/<rotation_id>/sections/<section_name>', methods=['GET'])
+@app.route("/api/rotations/<rotation_id>/sections/<section_name>", methods=["GET"])
 def get_section_template(rotation_id, section_name):
-    """Get template for a specific section"""
     template = state_manager.get_template(rotation_id)
-    
     if not template:
         return jsonify({"error": "Rotation not found"}), 404
-    
     for section in template.get("sections", []):
         if section.get("name") == section_name:
             return jsonify(section)
-    
     return jsonify({"error": "Section not found"}), 404
 
 
 # ============================================================================
-# CASE MANAGEMENT ENDPOINTS
+# CASE MANAGEMENT
 # ============================================================================
 
-@app.route('/api/cases', methods=['POST'])
+@app.route("/api/cases", methods=["POST"])
+@login_required
 def create_case():
-    """Create a new case"""
+    """Create a new clerking case (requires authentication)."""
     data = request.get_json()
-    
     if not data:
         return jsonify({"error": "Request body required"}), 400
-    
-    rotation = data.get('rotation')
-    
+
+    rotation = data.get("rotation")
     if not rotation:
-        return jsonify({"error": "Rotation is required"}), 400
-    
+        return jsonify({"error": "rotation is required"}), 400
+
     try:
-        case_state = state_manager.create_case(rotation)
-        
+        case = state_manager.create_case(rotation)
+
+        # Attach case to the authenticated user
+        _link_case_to_user(case["case_id"], g.current_user["user_id"])
+
         return jsonify({
             "message": "Case created successfully",
             "case": {
-                "case_id": case_state.case_id,
-                "rotation": case_state.rotation,
-                "current_section": case_state.current_section,
-                "created_at": case_state.created_at,
-                "is_complete": case_state.is_complete
-            }
+                "case_id": case["case_id"],
+                "rotation": case["rotation"],
+                "current_section": case["current_section"],
+                "created_at": case["created_at"],
+                "is_complete": case["is_complete"],
+            },
         }), 201
-        
+
     except ValueError as e:
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": f"Failed to create case: {str(e)}"}), 500
 
 
-@app.route('/api/cases', methods=['GET'])
+@app.route("/api/cases", methods=["GET"])
+@optional_auth
 def list_cases():
-    """List all cases"""
-    cases = state_manager.get_all_cases()
-    
-    return jsonify({
-        "cases": cases,
-        "total": len(cases)
-    })
+    """
+    List cases.
+    When authenticated returns only the caller's cases.
+    When unauthenticated (dev/demo mode) returns all cases.
+    """
+    try:
+        cases = state_manager.get_all_cases()
+
+        if g.current_user:
+            user_id = g.current_user["user_id"]
+            cases = _filter_cases_by_user(cases, user_id)
+
+        return jsonify({"cases": cases, "total": len(cases)})
+    except Exception as e:
+        return jsonify({"error": f"Failed to list cases: {str(e)}"}), 500
 
 
-@app.route('/api/cases/<case_id>', methods=['GET'])
+@app.route("/api/cases/<case_id>", methods=["GET"])
+@optional_auth
 def get_case(case_id):
-    """Get case details"""
-    case_state = state_manager.get_case(case_id)
-    
-    if not case_state:
+    case = state_manager.get_case(case_id)
+    if not case:
         return jsonify({"error": "Case not found"}), 404
-    
-    return jsonify(case_state.to_dict())
+
+    # Ownership check when authenticated
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
+
+    return jsonify(case)
 
 
-@app.route('/api/cases/<case_id>', methods=['DELETE'])
+@app.route("/api/cases/<case_id>", methods=["DELETE"])
+@login_required
 def delete_case(case_id):
-    """Delete a case"""
+    if not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
+
     success = state_manager.delete_case(case_id)
-    
     if not success:
         return jsonify({"error": "Case not found"}), 404
-    
-    return jsonify({
-        "message": "Case deleted successfully",
-        "case_id": case_id
-    })
+    return jsonify({"message": "Case deleted successfully", "case_id": case_id})
 
 
 # ============================================================================
 # SECTION ENDPOINTS
 # ============================================================================
 
-@app.route('/api/cases/<case_id>/sections/<section_name>', methods=['GET'])
+@app.route("/api/cases/<case_id>/sections/<section_name>", methods=["GET"])
+@optional_auth
 def get_section(case_id, section_name):
-    """Get section data"""
-    case_state = state_manager.get_case(case_id)
-    
-    if not case_state:
+    case = state_manager.get_case(case_id)
+    if not case:
         return jsonify({"error": "Case not found"}), 404
-    
-    if section_name not in case_state.sections:
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
+
+    sections = case.get("sections", {})
+    if section_name not in sections:
         return jsonify({"error": "Section not found"}), 404
-    
-    section = case_state.sections[section_name]
-    
+
+    section = sections[section_name]
     return jsonify({
         "case_id": case_id,
         "section_name": section_name,
-        "data": section.data,
-        "status": section.status,
-        "pending_clarifications": section.pending_clarifications
+        "data": section["data"],
+        "status": section["status"],
+        "pending_clarifications": section["pending_clarifications"],
     })
 
 
-@app.route('/api/cases/<case_id>/sections/<section_name>', methods=['PUT'])
+@app.route("/api/cases/<case_id>/sections/<section_name>", methods=["PUT"])
+@optional_auth
 def update_section(case_id, section_name):
-    """Update section data"""
     data = request.get_json()
-    
     if not data:
         return jsonify({"error": "Request body required"}), 400
-    
-    case_state = state_manager.get_case(case_id)
-    
-    if not case_state:
+
+    case = state_manager.get_case(case_id)
+    if not case:
         return jsonify({"error": "Case not found"}), 404
-    
-    if section_name not in case_state.sections:
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
+    if section_name not in case.get("sections", {}):
         return jsonify({"error": "Section not found"}), 404
-    
-    section_data = data.get('data', {})
-    status = data.get('status')
-    
+
+    section_data = data.get("data", {})
+    status = data.get("status")
+
     try:
-        case_state = state_manager.update_section(
-            case_id, section_name, section_data, status
-        )
-        
+        updated = state_manager.update_section(case_id, section_name, section_data, status)
         return jsonify({
             "message": "Section updated successfully",
             "case_id": case_id,
             "section_name": section_name,
-            "status": case_state.sections[section_name].status
+            "status": updated["sections"][section_name]["status"],
         })
-        
     except Exception as e:
         return jsonify({"error": f"Failed to update section: {str(e)}"}), 500
 
 
-@app.route('/api/cases/<case_id>/sections/<section_name>/submit', methods=['POST'])
+@app.route("/api/cases/<case_id>/sections/<section_name>/submit", methods=["POST"])
+@optional_auth
 def submit_section(case_id, section_name):
-    """Submit section data and get clarifications"""
+    """Submit section data and trigger clarification engine."""
     data = request.get_json()
-    
     if not data:
         return jsonify({"error": "Request body required"}), 400
-    
-    case_state = state_manager.get_case(case_id)
-    
-    if not case_state:
+
+    case = state_manager.get_case(case_id)
+    if not case:
         return jsonify({"error": "Case not found"}), 404
-    
-    if section_name not in case_state.sections:
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
+    if section_name not in case.get("sections", {}):
         return jsonify({"error": "Section not found"}), 404
-    
-    section_data = data.get('data', {})
-    
+
+    section_data = data.get("data", {})
+
     try:
-        # Update section data
-        case_state = state_manager.update_section(
+        # Persist the data first
+        case = state_manager.update_section(
             case_id, section_name, section_data, SectionStatus.IN_PROGRESS.value
         )
-        
-        # Get template
-        template = state_manager.get_template(case_state.rotation)
-        
-        # Get all sections for context
+
+        template = state_manager.get_template(case["rotation"])
         all_sections = {
-            name: {"data": s.data} 
-            for name, s in case_state.sections.items()
+            name: {"data": s["data"]}
+            for name, s in case["sections"].items()
         }
-        
-        # Process clarifications
+
         clarification_result = clarification_engine.process_section(
             case_id=case_id,
             section_name=section_name,
             section_data=section_data,
             template=template,
-            all_sections=all_sections
+            all_sections=all_sections,
         )
-        
-        # If clarifications needed, add them to section
+
         if clarification_result.questions:
-            case_state = state_manager.add_clarifications(
+            state_manager.add_clarifications(
                 case_id, section_name, clarification_result.questions
             )
-            
             return jsonify({
                 "message": "Clarifications needed",
                 "case_id": case_id,
@@ -359,102 +519,84 @@ def submit_section(case_id, section_name):
                 "clarifications_needed": True,
                 "questions": clarification_result.questions,
                 "source": clarification_result.source,
-                "confidence": clarification_result.confidence
+                "confidence": clarification_result.confidence,
             })
-        
-        # No clarifications needed - mark as complete
-        case_state = state_manager.update_section(
+
+        # No clarifications — mark complete
+        state_manager.update_section(
             case_id, section_name, section_data, SectionStatus.COMPLETE.value
         )
-        
-        # Add to completed sections
-        if section_name not in case_state.completed_sections:
-            case_state.completed_sections.append(section_name)
-        
         return jsonify({
             "message": "Section submitted successfully",
             "case_id": case_id,
             "section_name": section_name,
             "clarifications_needed": False,
-            "status": SectionStatus.COMPLETE.value
+            "status": SectionStatus.COMPLETE.value,
         })
-        
+
     except Exception as e:
         return jsonify({"error": f"Failed to submit section: {str(e)}"}), 500
 
 
-@app.route('/api/cases/<case_id>/sections/<section_name>/clarifications', methods=['POST'])
+@app.route("/api/cases/<case_id>/sections/<section_name>/clarifications", methods=["POST"])
+@optional_auth
 def answer_clarifications(case_id, section_name):
-    """Submit answers to clarification questions"""
+    """Merge clarification answers into section data and mark complete."""
     data = request.get_json()
-    
     if not data:
         return jsonify({"error": "Request body required"}), 400
-    
-    case_state = state_manager.get_case(case_id)
-    
-    if not case_state:
+
+    case = state_manager.get_case(case_id)
+    if not case:
         return jsonify({"error": "Case not found"}), 404
-    
-    if section_name not in case_state.sections:
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
+    if section_name not in case.get("sections", {}):
         return jsonify({"error": "Section not found"}), 404
-    
-    answers = data.get('answers', {})
-    
+
+    answers = data.get("answers", {})
+
     try:
-        # Merge answers into section data
-        section = case_state.sections[section_name]
-        updated_data = {**section.data, **answers}
-        
-        # Clear clarifications and mark as complete
-        case_state = state_manager.update_section(
-            case_id, section_name, updated_data, SectionStatus.COMPLETE.value
+        existing = case["sections"][section_name]["data"]
+        merged = {**existing, **answers}
+
+        state_manager.update_section(
+            case_id, section_name, merged, SectionStatus.COMPLETE.value
         )
-        case_state = state_manager.clear_clarifications(case_id, section_name)
-        
-        # Add to completed sections
-        if section_name not in case_state.completed_sections:
-            case_state.completed_sections.append(section_name)
-        
+        state_manager.clear_clarifications(case_id, section_name)
+
         return jsonify({
             "message": "Clarifications answered successfully",
             "case_id": case_id,
             "section_name": section_name,
-            "status": SectionStatus.COMPLETE.value
+            "status": SectionStatus.COMPLETE.value,
         })
-        
+
     except Exception as e:
         return jsonify({"error": f"Failed to answer clarifications: {str(e)}"}), 500
 
 
-@app.route('/api/cases/<case_id>/sections/<section_name>/skip', methods=['POST'])
+@app.route("/api/cases/<case_id>/sections/<section_name>/skip", methods=["POST"])
+@optional_auth
 def skip_section(case_id, section_name):
-    """Skip a section (mark as not applicable)"""
-    case_state = state_manager.get_case(case_id)
-    
-    if not case_state:
+    case = state_manager.get_case(case_id)
+    if not case:
         return jsonify({"error": "Case not found"}), 404
-    
-    if section_name not in case_state.sections:
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
+    if section_name not in case.get("sections", {}):
         return jsonify({"error": "Section not found"}), 404
-    
+
     try:
-        # Mark section as skipped (complete with empty data)
-        case_state = state_manager.update_section(
+        state_manager.update_section(
             case_id, section_name, {"_skipped": True}, SectionStatus.COMPLETE.value
         )
-        
-        # Add to completed sections
-        if section_name not in case_state.completed_sections:
-            case_state.completed_sections.append(section_name)
-        
         return jsonify({
-            "message": "Section skipped successfully",
+            "message": "Section skipped",
             "case_id": case_id,
             "section_name": section_name,
-            "status": SectionStatus.COMPLETE.value
+            "status": SectionStatus.COMPLETE.value,
         })
-        
     except Exception as e:
         return jsonify({"error": f"Failed to skip section: {str(e)}"}), 500
 
@@ -463,35 +605,35 @@ def skip_section(case_id, section_name):
 # WORKFLOW ENDPOINTS
 # ============================================================================
 
-@app.route('/api/cases/<case_id>/next', methods=['POST'])
+@app.route("/api/cases/<case_id>/next", methods=["POST"])
+@optional_auth
 def move_to_next_section(case_id):
-    """Move to next section in workflow"""
-    case_state = state_manager.get_case(case_id)
-    
-    if not case_state:
+    case = state_manager.get_case(case_id)
+    if not case:
         return jsonify({"error": "Case not found"}), 404
-    
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
+
     try:
-        case_state = state_manager.move_to_next_section(case_id)
-        
+        updated = state_manager.move_to_next_section(case_id)
         return jsonify({
             "message": "Moved to next section",
             "case_id": case_id,
-            "current_section": case_state.current_section,
-            "is_complete": case_state.is_complete,
-            "completed_sections": case_state.completed_sections
+            "current_section": updated["current_section"],
+            "is_complete": updated["is_complete"],
+            "completed_sections": updated["completed_sections"],
         })
-        
     except Exception as e:
-        return jsonify({"error": f"Failed to move to next section: {str(e)}"}), 500
+        return jsonify({"error": f"Failed to advance section: {str(e)}"}), 500
 
 
-@app.route('/api/cases/<case_id>/progress', methods=['GET'])
+@app.route("/api/cases/<case_id>/progress", methods=["GET"])
+@optional_auth
 def get_progress(case_id):
-    """Get case progress"""
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
     try:
-        progress = state_manager.get_progress(case_id)
-        return jsonify(progress)
+        return jsonify(state_manager.get_progress(case_id))
     except ValueError as e:
         return jsonify({"error": str(e)}), 404
     except Exception as e:
@@ -499,126 +641,90 @@ def get_progress(case_id):
 
 
 # ============================================================================
-# PARSING ENDPOINTS
+# PARSING ENDPOINTS  (public)
 # ============================================================================
 
-@app.route('/api/parse', methods=['POST'])
+@app.route("/api/parse", methods=["POST"])
 def parse_input():
-    """Parse clinical input text"""
     data = request.get_json()
-    
     if not data:
         return jsonify({"error": "Request body required"}), 400
-    
-    text = data.get('text')
-    section = data.get('section', 'general')
-    
+    text = data.get("text")
+    section = data.get("section", "general")
     if not text:
-        return jsonify({"error": "Text is required"}), 400
-    
+        return jsonify({"error": "text is required"}), 400
     try:
-        result = input_parser.parse(text, section)
-        return jsonify(result)
+        return jsonify(input_parser.parse(text, section))
     except Exception as e:
         return jsonify({"error": f"Failed to parse input: {str(e)}"}), 500
 
 
-@app.route('/api/parse/socrates', methods=['POST'])
+@app.route("/api/parse/socrates", methods=["POST"])
 def parse_socrates():
-    """Parse SOCRATES pain assessment"""
     data = request.get_json()
-    
     if not data:
         return jsonify({"error": "Request body required"}), 400
-    
-    text = data.get('text')
-    
+    text = data.get("text")
     if not text:
-        return jsonify({"error": "Text is required"}), 400
-    
+        return jsonify({"error": "text is required"}), 400
     try:
         socrates = input_parser._extract_socrates_pain(text)
-        
-        if socrates:
-            return jsonify(socrates.to_dict())
-        else:
-            return jsonify({
-                "site": None,
-                "onset": None,
-                "character": None,
-                "radiation": None,
-                "associations": None,
-                "time_course": None,
-                "exacerbating": None,
-                "relieving": None,
-                "severity": None,
-                "is_complete": False
-            })
+        return jsonify(socrates.to_dict() if socrates else {
+            "site": None, "onset": None, "character": None,
+            "radiation": None, "associations": None, "time_course": None,
+            "exacerbating": None, "relieving": None, "severity": None,
+            "is_complete": False,
+        })
     except Exception as e:
         return jsonify({"error": f"Failed to parse SOCRATES: {str(e)}"}), 500
 
 
 # ============================================================================
-# CLARIFICATION ENDPOINTS
+# CLARIFICATION ENDPOINTS  (public)
 # ============================================================================
 
-@app.route('/api/clarify', methods=['POST'])
+@app.route("/api/clarify", methods=["POST"])
 def generate_clarifications():
-    """Generate clarifications for section data"""
     data = request.get_json()
-    
     if not data:
         return jsonify({"error": "Request body required"}), 400
-    
-    section_name = data.get('section_name')
-    section_data = data.get('section_data', {})
-    rotation = data.get('rotation')
-    
+    section_name = data.get("section_name")
+    section_data = data.get("section_data", {})
+    rotation = data.get("rotation")
     if not section_name or not rotation:
         return jsonify({"error": "section_name and rotation are required"}), 400
-    
+    template = state_manager.get_template(rotation)
+    if not template:
+        return jsonify({"error": "Rotation not found"}), 404
     try:
-        template = state_manager.get_template(rotation)
-        
-        if not template:
-            return jsonify({"error": "Rotation not found"}), 404
-        
         result = clarification_engine.process_section(
             case_id="temp",
             section_name=section_name,
             section_data=section_data,
-            template=template
+            template=template,
         )
-        
         return jsonify({
             "questions": result.questions,
             "source": result.source,
             "confidence": result.confidence,
-            "reasoning": result.reasoning
+            "reasoning": result.reasoning,
         })
-        
     except Exception as e:
         return jsonify({"error": f"Failed to generate clarifications: {str(e)}"}), 500
 
 
-@app.route('/api/clarify/contradictions', methods=['POST'])
+@app.route("/api/clarify/contradictions", methods=["POST"])
 def detect_contradictions():
-    """Detect contradictions across sections"""
     data = request.get_json()
-    
     if not data:
         return jsonify({"error": "Request body required"}), 400
-    
-    sections = data.get('sections', {})
-    
+    sections = data.get("sections", {})
     try:
         contradictions = clarification_engine.detect_contradictions(sections)
-        
         return jsonify({
             "contradictions_found": len(contradictions) > 0,
-            "contradictions": contradictions
+            "contradictions": contradictions,
         })
-        
     except Exception as e:
         return jsonify({"error": f"Failed to detect contradictions: {str(e)}"}), 500
 
@@ -627,122 +733,156 @@ def detect_contradictions():
 # EXPORT ENDPOINTS
 # ============================================================================
 
-@app.route('/api/cases/<case_id>/export', methods=['POST'])
+@app.route("/api/cases/<case_id>/export", methods=["POST"])
+@optional_auth
 def export_case(case_id):
-    """Export case to document"""
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
+
     data = request.get_json() or {}
-    
-    format_type = data.get('format', 'markdown')
-    include_sections = data.get('sections')
-    
-    case_state = state_manager.get_case(case_id)
-    
-    if not case_state:
+    format_type = data.get("format", "markdown")
+    include_sections = data.get("sections")
+
+    case = state_manager.get_case(case_id)
+    if not case:
         return jsonify({"error": "Case not found"}), 404
-    
+
     try:
-        case_data = case_state.to_dict()
-        
-        if format_type == 'markdown':
-            result = document_compiler.compile_markdown(
-                case_id, case_data, include_sections
-            )
-        elif format_type == 'word':
-            result = document_compiler.compile_word(
-                case_id, case_data, include_sections
-            )
+        if format_type == "markdown":
+            result = document_compiler.compile_markdown(case_id, case, include_sections)
+        elif format_type == "word":
+            result = document_compiler.compile_word(case_id, case, include_sections)
         else:
             return jsonify({"error": "Invalid format. Use 'markdown' or 'word'"}), 400
-        
+
         if result.success:
             return jsonify({
                 "message": f"Case exported to {format_type} successfully",
                 "case_id": case_id,
                 "format": format_type,
                 "file_path": result.file_path,
-                "content": result.content if format_type == 'markdown' else None
+                "content": result.content if format_type == "markdown" else None,
             })
-        else:
-            return jsonify({"error": result.error}), 500
-            
+        return jsonify({"error": result.error}), 500
+
     except Exception as e:
         return jsonify({"error": f"Failed to export case: {str(e)}"}), 500
 
 
-@app.route('/api/cases/<case_id>/export/download', methods=['GET'])
+@app.route("/api/cases/<case_id>/export/download", methods=["GET"])
+@optional_auth
 def download_export(case_id):
-    """Download exported case document"""
-    format_type = request.args.get('format', 'markdown')
-    
-    if format_type == 'markdown':
-        file_path = os.path.join(document_compiler.output_dir, f"{case_id}.md")
-        mimetype = 'text/markdown'
-    elif format_type == 'word':
-        file_path = os.path.join(document_compiler.output_dir, f"{case_id}.docx")
-        mimetype = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document'
-    else:
-        return jsonify({"error": "Invalid format"}), 400
-    
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
+
+    format_type = request.args.get("format", "markdown")
+    ext = "md" if format_type == "markdown" else "docx"
+    file_path = os.path.join(document_compiler.output_dir, f"{case_id}.{ext}")
+    mimetype = (
+        "text/markdown"
+        if format_type == "markdown"
+        else "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
     if not os.path.exists(file_path):
-        return jsonify({"error": "Export not found. Please export the case first"}), 404
-    
-    from flask import send_file
+        return jsonify({"error": "Export not found. Please export the case first."}), 404
+
     return send_file(
         file_path,
         mimetype=mimetype,
         as_attachment=True,
-        download_name=f"clerkase_{case_id}.{format_type if format_type == 'markdown' else 'docx'}"
+        download_name=f"clerkase_{case_id}.{ext}",
     )
 
 
-@app.route('/api/cases/<case_id>/summary', methods=['GET'])
+@app.route("/api/cases/<case_id>/summary", methods=["GET"])
+@optional_auth
 def get_case_summary(case_id):
-    """Get brief case summary"""
-    case_state = state_manager.get_case(case_id)
-    
-    if not case_state:
+    if g.current_user and not _user_owns_case(case_id, g.current_user["user_id"]):
+        return jsonify({"error": "Access denied"}), 403
+
+    case = state_manager.get_case(case_id)
+    if not case:
         return jsonify({"error": "Case not found"}), 404
-    
+
     try:
-        case_data = case_state.to_dict()
-        result = document_compiler.compile_case_summary(case_id, case_data)
-        
+        result = document_compiler.compile_case_summary(case_id, case)
         if result.success:
-            return jsonify({
-                "case_id": case_id,
-                "summary": result.content
-            })
-        else:
-            return jsonify({"error": result.error}), 500
-            
+            return jsonify({"case_id": case_id, "summary": result.content})
+        return jsonify({"error": result.error}), 500
     except Exception as e:
         return jsonify({"error": f"Failed to generate summary: {str(e)}"}), 500
 
 
 # ============================================================================
-# MAIN ENTRY POINT
+# OWNERSHIP HELPERS  (private)
 # ============================================================================
 
-if __name__ == '__main__':
-    # Create necessary directories
-    os.makedirs('case_storage', exist_ok=True)
-    os.makedirs('exports', exist_ok=True)
-    
-    # Get port from environment or use default
-    port = int(os.getenv('PORT', 5000))
-    debug = os.getenv('FLASK_DEBUG', 'false').lower() == 'true'
-    
+def _link_case_to_user(case_id: str, user_id: int) -> None:
+    """Set user_id on a freshly created Case row."""
+    from database import SessionLocal as _SL
+    from database.models import Case as _Case
+    db = _SL()
+    try:
+        row = db.query(_Case).filter(_Case.case_id == case_id).first()
+        if row:
+            row.user_id = user_id
+            db.commit()
+    except Exception:
+        db.rollback()
+    finally:
+        db.close()
+
+
+def _user_owns_case(case_id: str, user_id: int) -> bool:
+    """Return True if the Case row's user_id matches user_id (or has no owner)."""
+    from database import SessionLocal as _SL
+    from database.models import Case as _Case
+    db = _SL()
+    try:
+        row = db.query(_Case).filter(_Case.case_id == case_id).first()
+        if not row:
+            return False
+        # Cases with no owner are accessible to everyone (dev / demo mode)
+        return row.user_id is None or row.user_id == user_id
+    finally:
+        db.close()
+
+
+def _filter_cases_by_user(cases: list, user_id: int) -> list:
+    """Return only cases owned by user_id (or ownerless cases)."""
+    from database import SessionLocal as _SL
+    from database.models import Case as _Case
+    db = _SL()
+    try:
+        rows = (
+            db.query(_Case.case_id)
+            .filter(
+                (_Case.user_id == user_id) | (_Case.user_id == None)  # noqa: E711
+            )
+            .all()
+        )
+        allowed = {r.case_id for r in rows}
+        return [c for c in cases if c["case_id"] in allowed]
+    finally:
+        db.close()
+
+
+# ============================================================================
+# ENTRY POINT
+# ============================================================================
+
+if __name__ == "__main__":
+    os.makedirs("exports", exist_ok=True)
+
+    port = int(os.getenv("PORT", 5000))
+    debug = os.getenv("FLASK_DEBUG", "false").lower() == "true"
+
     print(f"""
 ╔══════════════════════════════════════════════════════════════╗
-║                                                              ║
-║   ClerKase - AI-Powered Clinical Clerking Assistant          ║
-║                                                              ║
-║   API Server Starting...                                     ║
-║                                                              ║
-║   Port: {port:<5}                                              ║
-║   Debug: {str(debug):<5}                                             ║
-║                                                              ║
+║   ClerKase — AI Clinical Clerking Assistant                  ║
+║   API Server Starting on port {port:<5}                        ║
 ╚══════════════════════════════════════════════════════════════╝
     """)
-    
-    app.run(host='0.0.0.0', port=port, debug=debug)
+
+    app.run(host="0.0.0.0", port=port, debug=debug)

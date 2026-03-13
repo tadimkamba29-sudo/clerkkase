@@ -1,17 +1,26 @@
 """
-Authentication package for ClerKase
+Authentication package for ClerKase.
 """
 
-from .jwt_handler import (
-    generate_token,
-    verify_token,
-    token_required,
-    get_current_user
+from .utils import (
+    hash_password,
+    verify_password,
+    validate_password_strength,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    extract_bearer_token,
 )
+from .decorators import login_required, optional_auth
 
 __all__ = [
-    'generate_token',
-    'verify_token',
-    'token_required',
-    'get_current_user'
+    "hash_password",
+    "verify_password",
+    "validate_password_strength",
+    "create_access_token",
+    "create_refresh_token",
+    "decode_token",
+    "extract_bearer_token",
+    "login_required",
+    "optional_auth",
 ]
