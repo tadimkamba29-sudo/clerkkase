@@ -426,7 +426,7 @@ def create_case():
         case = sm.create_case(rotation)
 
         # Link to user if authenticated
-        if g.current_user:
+        if hasattr(g, 'current_user') and g.current_user:
             _link_case_to_user(case["case_id"], g.current_user["user_id"])
 
         return jsonify({
