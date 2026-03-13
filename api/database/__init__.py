@@ -1,5 +1,6 @@
 """
-Database package for ClerKase
+Database package for ClerKase.
+Exports all models and session utilities from a single import point.
 """
 
 from .models import (
@@ -9,25 +10,36 @@ from .models import (
     CaseSection,
     CaseFlag,
     DifferentialDiagnosis,
-    AIUsage
+    AIUsage,
+    SectionStatus,
+    FlagType,
+    FlagSeverity,
+    DifferentialPoint,
 )
 from .session import (
     engine,
     SessionLocal,
     get_db,
-    init_db
+    init_db,
 )
 
 __all__ = [
-    'Base',
-    'User',
-    'Case',
-    'CaseSection',
-    'CaseFlag',
-    'DifferentialDiagnosis',
-    'AIUsage',
-    'engine',
-    'SessionLocal',
-    'get_db',
-    'init_db'
+    # Models
+    "Base",
+    "User",
+    "Case",
+    "CaseSection",
+    "CaseFlag",
+    "DifferentialDiagnosis",
+    "AIUsage",
+    # Enums
+    "SectionStatus",
+    "FlagType",
+    "FlagSeverity",
+    "DifferentialPoint",
+    # Session
+    "engine",
+    "SessionLocal",
+    "get_db",
+    "init_db",
 ]

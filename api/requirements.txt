@@ -1,6 +1,29 @@
+# ============================================================
+# ClerKase Backend Dependencies
+# ============================================================
+
+# Web Framework
 Flask==3.0.0
 Flask-CORS==4.0.0
+
+# Environment
+python-dotenv==1.0.0
+
+# Database
+SQLAlchemy==2.0.23
+psycopg2-binary==2.9.9    # PostgreSQL driver
+alembic==1.13.1           # Database migrations
+
+# Authentication
+PyJWT==2.8.0
+bcrypt==4.1.2             # Password hashing
+
+# AI Integration
+anthropic==0.18.1
+
+# Document Generation
 python-docx==1.1.0
 markdown==3.5.1
-python-dotenv==1.0.0
-psycopg2-binary==2.9.9
+
+# Utilities
+uuid                      # Built-in, listed for clarity

@@ -1,150 +1,95 @@
 """
-State Manager for ClerKase
-Manages case state, progress tracking, and workflow
-Uses PostgreSQL (Neon) for persistent storage
+State Manager for ClerKase (SQLAlchemy version)
+================================================
+Replaces the raw-psycopg2 implementation with a proper ORM layer.
+
+Responsibilities
+----------------
+1. Load rotation templates from JSON
+2. Create / retrieve / delete cases
+3. Update section data and status
+4. Manage clarification questions per section
+5. Track flags (contradictions, gaps, warnings)
+6. Store differential diagnosis evolution
+7. Report progress
+
+All cases are persisted to the database configured in DATABASE_URL.
+Defaults to SQLite for local development; set DATABASE_URL to a
+PostgreSQL connection string for production.
 """
 
 import json
 import os
-from datetime import datetime
-from typing import Dict, List, Optional, Any
-from dataclasses import dataclass
-from enum import Enum
 import uuid
+from datetime import datetime
+from typing import Any, Dict, List, Optional
+
+from database import (
+    init_db,
+    SessionLocal,
+    Case,
+    CaseSection,
+    CaseFlag,
+    DifferentialDiagnosis,
+    SectionStatus,
+    FlagType,
+    FlagSeverity,
+    DifferentialPoint,
+)
 
 
-class SectionStatus(Enum):
-    NOT_STARTED = "not_started"
-    IN_PROGRESS = "in_progress"
-    PENDING_CLARIFICATION = "pending_clarification"
-    COMPLETE = "complete"
+# ============================================================================
+# HELPERS
+# ============================================================================
+
+def _get_db():
+    """Return a new SQLAlchemy session. Caller is responsible for closing."""
+    return SessionLocal()
 
 
-@dataclass
-class SectionData:
-    section_name: str
-    data: Dict[str, Any]
-    status: str = "not_started"
-    pending_clarifications: List[str] = None
-
-    def __post_init__(self):
-        if self.pending_clarifications is None:
-            self.pending_clarifications = []
-
-
-@dataclass
-class CaseState:
-    case_id: str
-    rotation: str
-    template_version: str
-    current_section: str
-    completed_sections: List[str]
-    section_status: Dict[str, str]
-    sections: Dict[str, SectionData]
-    created_at: str
-    last_updated: str
-    is_complete: bool = False
-    completed_at: Optional[str] = None
-
-    def to_dict(self) -> Dict:
-        return {
-            "case_id": self.case_id,
-            "rotation": self.rotation,
-            "template_version": self.template_version,
-            "current_section": self.current_section,
-            "completed_sections": self.completed_sections,
-            "section_status": self.section_status,
-            "sections": {
-                name: {
-                    "section_name": s.section_name,
-                    "data": s.data,
-                    "status": s.status,
-                    "pending_clarifications": s.pending_clarifications
-                } for name, s in self.sections.items()
-            },
-            "created_at": self.created_at,
-            "last_updated": self.last_updated,
-            "is_complete": self.is_complete,
-            "completed_at": self.completed_at
-        }
-
-    @classmethod
-    def from_dict(cls, data: Dict) -> 'CaseState':
-        sections = {}
-        for name, s_data in data.get("sections", {}).items():
-            sections[name] = SectionData(
-                section_name=s_data["section_name"],
-                data=s_data.get("data", {}),
-                status=s_data.get("status", "not_started"),
-                pending_clarifications=s_data.get("pending_clarifications", [])
-            )
-        return cls(
-            case_id=data["case_id"],
-            rotation=data["rotation"],
-            template_version=data.get("template_version", "1.0"),
-            current_section=data["current_section"],
-            completed_sections=data.get("completed_sections", []),
-            section_status=data.get("section_status", {}),
-            sections=sections,
-            created_at=data["created_at"],
-            last_updated=data["last_updated"],
-            is_complete=data.get("is_complete", False),
-            completed_at=data.get("completed_at")
-        )
-
+# ============================================================================
+# STATE MANAGER
+# ============================================================================
 
 class StateManager:
     """
-    Manages case state and workflow
-    Uses PostgreSQL for persistent storage
+    Database-backed state manager for clinical clerking cases.
+
+    Designed as a drop-in replacement for the previous psycopg2-based
+    implementation. The public API is identical so index.py needs no changes.
     """
 
     def __init__(self):
-        self._templates = {}
+        self._templates: Dict[str, Dict] = {}
         self._load_templates()
-        self._init_database()
+        init_db()   # creates tables if they don't exist (idempotent)
 
-    def _get_conn(self):
-        """Get a database connection"""
-        import psycopg2
-        database_url = os.environ.get('DATABASE_URL')
-        if not database_url:
-            raise RuntimeError("DATABASE_URL environment variable not set")
-        return psycopg2.connect(database_url)
-
-    def _init_database(self):
-        """Create cases table if it doesn't exist"""
-        conn = self._get_conn()
-        cur = conn.cursor()
-        cur.execute("""
-            CREATE TABLE IF NOT EXISTS cases (
-                case_id TEXT PRIMARY KEY,
-                rotation TEXT NOT NULL,
-                data JSONB NOT NULL,
-                created_at TIMESTAMP DEFAULT NOW(),
-                updated_at TIMESTAMP DEFAULT NOW()
-            )
-        """)
-        conn.commit()
-        cur.close()
-        conn.close()
+    # ------------------------------------------------------------------
+    # TEMPLATE LOADING
+    # ------------------------------------------------------------------
 
     def _load_templates(self):
-        """Load all rotation templates"""
-        templates_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "templates")
+        """Load all rotation JSON templates from the templates/ directory."""
+        templates_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)), "templates"
+        )
         rotations = [
             "paediatrics",
             "surgery",
             "internal_medicine",
             "obstetrics_gynaecology",
             "psychiatry",
-            "emergency_medicine"
+            "emergency_medicine",
         ]
         for rotation in rotations:
-            template_path = os.path.join(templates_dir, f"{rotation}.json")
-            if os.path.exists(template_path):
-                with open(template_path, 'r') as f:
+            path = os.path.join(templates_dir, f"{rotation}.json")
+            if os.path.exists(path):
+                with open(path, "r", encoding="utf-8") as f:
                     self._templates[rotation] = json.load(f)
+            else:
+                print(f"⚠  Template not found: {path}")
+
+        print(f"✓ Loaded {len(self._templates)} rotation template(s)")
 
     def get_template(self, rotation: str) -> Optional[Dict]:
         return self._templates.get(rotation)
@@ -156,222 +101,539 @@ class StateManager:
         template = self.get_template(rotation)
         if not template:
             return []
-        sections = sorted(template["sections"], key=lambda s: s["order"])
+        sections = sorted(template.get("sections", []), key=lambda s: s["order"])
         return [s["name"] for s in sections]
 
-    def create_case(self, rotation: str) -> CaseState:
+    # ------------------------------------------------------------------
+    # CASE LIFECYCLE
+    # ------------------------------------------------------------------
+
+    def create_case(self, rotation: str) -> "CaseStateProxy":
+        """
+        Create and persist a new case.
+
+        Returns a CaseStateProxy (dict-like) consistent with the old API.
+        """
         if rotation not in self._templates:
-            raise ValueError(f"Unknown rotation: {rotation}")
+            raise ValueError(
+                f"Unknown rotation: '{rotation}'. "
+                f"Available: {', '.join(self._templates)}"
+            )
+
         template = self._templates[rotation]
         section_order = self.get_section_order(rotation)
         if not section_order:
-            raise ValueError(f"No sections found for rotation: {rotation}")
+            raise ValueError(f"No sections defined for rotation: {rotation}")
 
-        sections = {}
-        section_status = {}
-        for section_name in section_order:
-            sections[section_name] = SectionData(
-                section_name=section_name,
-                data={},
-                status=SectionStatus.NOT_STARTED.value,
-                pending_clarifications=[]
+        case_id = str(uuid.uuid4())
+        now = datetime.utcnow()
+
+        # Build initial section_status dict
+        section_status = {name: SectionStatus.NOT_STARTED.value for name in section_order}
+        section_status[section_order[0]] = SectionStatus.IN_PROGRESS.value
+
+        db = _get_db()
+        try:
+            db_case = Case(
+                case_id=case_id,
+                rotation=rotation,
+                template_version=template.get("version", "1.0"),
+                current_section=section_order[0],
+                completed_sections=[],
+                section_status=section_status,
+                created_at=now,
+                last_updated=now,
             )
-            section_status[section_name] = SectionStatus.NOT_STARTED.value
+            db.add(db_case)
+            db.flush()  # get db_case.id before creating sections
 
-        now = datetime.utcnow().isoformat()
-        case_state = CaseState(
-            case_id=str(uuid.uuid4()),
-            rotation=rotation,
-            template_version=template.get("version", "1.0"),
-            current_section=section_order[0],
-            completed_sections=[],
-            section_status=section_status,
-            sections=sections,
-            created_at=now,
-            last_updated=now
-        )
-        self._save_case(case_state)
-        return case_state
+            # Pre-create a CaseSection row for every section
+            for name in section_order:
+                db.add(CaseSection(
+                    case_id=db_case.id,
+                    section_name=name,
+                    data={},
+                    status=SectionStatus.NOT_STARTED,
+                    pending_clarifications=[],
+                ))
 
-    def get_case(self, case_id: str) -> Optional[CaseState]:
+            db.commit()
+            db.refresh(db_case)
+            return self._to_proxy(db_case)
+
+        finally:
+            db.close()
+
+    def get_case(self, case_id: str) -> Optional["CaseStateProxy"]:
+        """Return a CaseStateProxy or None if not found."""
+        db = _get_db()
         try:
-            conn = self._get_conn()
-            cur = conn.cursor()
-            cur.execute("SELECT data FROM cases WHERE case_id = %s", (case_id,))
-            row = cur.fetchone()
-            cur.close()
-            conn.close()
-            if row:
-                data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-                return CaseState.from_dict(data)
-            return None
+            db_case = db.query(Case).filter(Case.case_id == case_id).first()
+            if not db_case:
+                return None
+            return self._to_proxy(db_case)
+        finally:
+            db.close()
+
+    def delete_case(self, case_id: str) -> bool:
+        """Permanently delete a case and all related data."""
+        db = _get_db()
+        try:
+            db_case = db.query(Case).filter(Case.case_id == case_id).first()
+            if not db_case:
+                return False
+            db.delete(db_case)
+            db.commit()
+            return True
         except Exception as e:
-            print(f"Error loading case {case_id}: {e}")
-            return None
+            db.rollback()
+            print(f"Error deleting case {case_id}: {e}")
+            return False
+        finally:
+            db.close()
 
-    def _save_case(self, case_state: CaseState):
-        """Save case state to database"""
-        conn = self._get_conn()
-        cur = conn.cursor()
-        data = json.dumps(case_state.to_dict())
-        cur.execute("""
-            INSERT INTO cases (case_id, rotation, data, updated_at)
-            VALUES (%s, %s, %s, NOW())
-            ON CONFLICT (case_id)
-            DO UPDATE SET data = EXCLUDED.data, updated_at = NOW()
-        """, (case_state.case_id, case_state.rotation, data))
-        conn.commit()
-        cur.close()
-        conn.close()
-
-    def update_section(self, case_id, section_name, data, status=None):
-        case_state = self.get_case(case_id)
-        if not case_state:
-            raise ValueError(f"Case not found: {case_id}")
-        if section_name not in case_state.sections:
-            raise ValueError(f"Section not found: {section_name}")
-
-        section = case_state.sections[section_name]
-        section.data = data
-        if status:
-            section.status = status
-            case_state.section_status[section_name] = status
-        case_state.last_updated = datetime.utcnow().isoformat()
-        self._save_case(case_state)
-        return case_state
-
-    def add_clarifications(self, case_id, section_name, questions):
-        case_state = self.get_case(case_id)
-        if not case_state:
-            raise ValueError(f"Case not found: {case_id}")
-        if section_name not in case_state.sections:
-            raise ValueError(f"Section not found: {section_name}")
-
-        section = case_state.sections[section_name]
-        section.pending_clarifications = questions
-        section.status = SectionStatus.PENDING_CLARIFICATION.value
-        case_state.section_status[section_name] = SectionStatus.PENDING_CLARIFICATION.value
-        case_state.last_updated = datetime.utcnow().isoformat()
-        self._save_case(case_state)
-        return case_state
-
-    def clear_clarifications(self, case_id, section_name):
-        case_state = self.get_case(case_id)
-        if not case_state:
-            raise ValueError(f"Case not found: {case_id}")
-        if section_name not in case_state.sections:
-            raise ValueError(f"Section not found: {section_name}")
-
-        section = case_state.sections[section_name]
-        section.pending_clarifications = []
-        if section.data:
-            section.status = SectionStatus.COMPLETE.value
-            case_state.section_status[section_name] = SectionStatus.COMPLETE.value
-            if section_name not in case_state.completed_sections:
-                case_state.completed_sections.append(section_name)
-        else:
-            section.status = SectionStatus.IN_PROGRESS.value
-            case_state.section_status[section_name] = SectionStatus.IN_PROGRESS.value
-        case_state.last_updated = datetime.utcnow().isoformat()
-        self._save_case(case_state)
-        return case_state
-
-    def move_to_next_section(self, case_id):
-        case_state = self.get_case(case_id)
-        if not case_state:
-            raise ValueError(f"Case not found: {case_id}")
-
-        section_order = self.get_section_order(case_state.rotation)
-        current_idx = section_order.index(case_state.current_section)
-
-        current_section = case_state.sections[case_state.current_section]
-        if current_section.status != SectionStatus.COMPLETE.value:
-            current_section.status = SectionStatus.COMPLETE.value
-            case_state.section_status[case_state.current_section] = SectionStatus.COMPLETE.value
-            if case_state.current_section not in case_state.completed_sections:
-                case_state.completed_sections.append(case_state.current_section)
-
-        if current_idx < len(section_order) - 1:
-            case_state.current_section = section_order[current_idx + 1]
-        else:
-            case_state.is_complete = True
-            case_state.completed_at = datetime.utcnow().isoformat()
-
-        case_state.last_updated = datetime.utcnow().isoformat()
-        self._save_case(case_state)
-        return case_state
-
-    def get_progress(self, case_id):
-        case_state = self.get_case(case_id)
-        if not case_state:
-            raise ValueError(f"Case not found: {case_id}")
-
-        section_order = self.get_section_order(case_state.rotation)
-        total_sections = len(section_order)
-        completed = len(case_state.completed_sections)
-        pending_clarifications = sum(
-            1 for s in case_state.sections.values()
-            if s.pending_clarifications
-        )
-        return {
-            "case_id": case_id,
-            "rotation": case_state.rotation,
-            "total_sections": total_sections,
-            "completed_sections": completed,
-            "completion_percentage": round((completed / total_sections) * 100, 1),
-            "current_section": case_state.current_section,
-            "is_complete": case_state.is_complete,
-            "pending_clarifications": pending_clarifications,
-            "section_breakdown": {
-                name: {
-                    "status": case_state.section_status.get(name, "not_started"),
-                    "has_clarifications": bool(
-                        case_state.sections.get(name, SectionData("", {})).pending_clarifications
-                    )
-                } for name in section_order
-            }
-        }
-
-    def get_all_cases(self):
+    def get_all_cases(self) -> List[Dict]:
+        """Return a summary list of all cases, most recently updated first."""
+        db = _get_db()
         try:
-            conn = self._get_conn()
-            cur = conn.cursor()
-            cur.execute("SELECT data FROM cases ORDER BY updated_at DESC")
-            rows = cur.fetchall()
-            cur.close()
-            conn.close()
-            cases = []
-            for row in rows:
-                data = row[0] if isinstance(row[0], dict) else json.loads(row[0])
-                cases.append({
-                    "case_id": data["case_id"],
-                    "rotation": data["rotation"],
-                    "current_section": data["current_section"],
-                    "is_complete": data.get("is_complete", False),
-                    "created_at": data["created_at"],
-                    "last_updated": data["last_updated"]
-                })
-            return cases
+            rows = (
+                db.query(Case)
+                .order_by(Case.last_updated.desc())
+                .all()
+            )
+            return [
+                {
+                    "case_id": c.case_id,
+                    "rotation": c.rotation,
+                    "current_section": c.current_section,
+                    "is_complete": c.is_complete,
+                    "created_at": c.created_at.isoformat() if c.created_at else None,
+                    "last_updated": c.last_updated.isoformat() if c.last_updated else None,
+                }
+                for c in rows
+            ]
         except Exception as e:
             print(f"Error listing cases: {e}")
             return []
+        finally:
+            db.close()
 
-    def delete_case(self, case_id):
+    # ------------------------------------------------------------------
+    # SECTION DATA
+    # ------------------------------------------------------------------
+
+    def update_section(
+        self,
+        case_id: str,
+        section_name: str,
+        data: Dict[str, Any],
+        status: Optional[str] = None,
+    ) -> "CaseStateProxy":
+        """
+        Persist field data for a section.
+
+        If status is provided it must be a SectionStatus.value string.
+        """
+        db = _get_db()
         try:
-            conn = self._get_conn()
-            cur = conn.cursor()
-            cur.execute("DELETE FROM cases WHERE case_id = %s RETURNING case_id", (case_id,))
-            deleted = cur.fetchone() is not None
-            conn.commit()
-            cur.close()
-            conn.close()
-            return deleted
-        except Exception as e:
-            print(f"Error deleting case {case_id}: {e}")
-            return False
+            db_case = self._require_case(db, case_id)
+            section = self._require_section(db, db_case.id, section_name)
+
+            section.data = data
+            section.updated_at = datetime.utcnow()
+
+            if status:
+                section.status = SectionStatus(status)
+                db_case.section_status = {
+                    **db_case.section_status,
+                    section_name: status,
+                }
+
+            db_case.last_updated = datetime.utcnow()
+            db.commit()
+            db.refresh(db_case)
+            return self._to_proxy(db_case)
+
+        finally:
+            db.close()
+
+    def get_section_data(self, case_id: str, section_name: str) -> Dict[str, Any]:
+        """Return the stored field data for a section, or {}."""
+        db = _get_db()
+        try:
+            db_case = self._require_case(db, case_id)
+            section = self._require_section(db, db_case.id, section_name)
+            return section.data or {}
+        finally:
+            db.close()
+
+    # ------------------------------------------------------------------
+    # CLARIFICATIONS
+    # ------------------------------------------------------------------
+
+    def add_clarifications(
+        self, case_id: str, section_name: str, questions: List[str]
+    ) -> "CaseStateProxy":
+        """Attach clarification questions to a section."""
+        db = _get_db()
+        try:
+            db_case = self._require_case(db, case_id)
+            section = self._require_section(db, db_case.id, section_name)
+
+            section.pending_clarifications = questions
+            section.status = SectionStatus.PENDING_CLARIFICATION
+            db_case.section_status = {
+                **db_case.section_status,
+                section_name: SectionStatus.PENDING_CLARIFICATION.value,
+            }
+            db_case.last_updated = datetime.utcnow()
+            db.commit()
+            db.refresh(db_case)
+            return self._to_proxy(db_case)
+
+        finally:
+            db.close()
+
+    def clear_clarifications(
+        self, case_id: str, section_name: str
+    ) -> "CaseStateProxy":
+        """
+        Clear pending clarifications from a section.
+        Marks the section complete if it already has data, otherwise in_progress.
+        """
+        db = _get_db()
+        try:
+            db_case = self._require_case(db, case_id)
+            section = self._require_section(db, db_case.id, section_name)
+
+            section.pending_clarifications = []
+
+            if section.data:
+                new_status = SectionStatus.COMPLETE
+                if section_name not in (db_case.completed_sections or []):
+                    completed = list(db_case.completed_sections or [])
+                    completed.append(section_name)
+                    db_case.completed_sections = completed
+            else:
+                new_status = SectionStatus.IN_PROGRESS
+
+            section.status = new_status
+            db_case.section_status = {
+                **db_case.section_status,
+                section_name: new_status.value,
+            }
+            db_case.last_updated = datetime.utcnow()
+            db.commit()
+            db.refresh(db_case)
+            return self._to_proxy(db_case)
+
+        finally:
+            db.close()
+
+    # ------------------------------------------------------------------
+    # WORKFLOW
+    # ------------------------------------------------------------------
+
+    def move_to_next_section(self, case_id: str) -> "CaseStateProxy":
+        """
+        Mark the current section complete and advance to the next one.
+        Sets is_complete=True when the final section is reached.
+        """
+        db = _get_db()
+        try:
+            db_case = self._require_case(db, case_id)
+            section_order = self.get_section_order(db_case.rotation)
+            current = db_case.current_section
+
+            # Mark current section complete
+            section = self._require_section(db, db_case.id, current)
+            section.status = SectionStatus.COMPLETE
+
+            status_map = dict(db_case.section_status or {})
+            status_map[current] = SectionStatus.COMPLETE.value
+            db_case.section_status = status_map
+
+            completed = list(db_case.completed_sections or [])
+            if current not in completed:
+                completed.append(current)
+            db_case.completed_sections = completed
+
+            # Advance
+            try:
+                idx = section_order.index(current)
+            except ValueError:
+                idx = -1
+
+            if idx < len(section_order) - 1:
+                db_case.current_section = section_order[idx + 1]
+            else:
+                db_case.is_complete = True
+                db_case.completed_at = datetime.utcnow()
+
+            db_case.last_updated = datetime.utcnow()
+            db.commit()
+            db.refresh(db_case)
+            return self._to_proxy(db_case)
+
+        finally:
+            db.close()
+
+    # ------------------------------------------------------------------
+    # FLAGS
+    # ------------------------------------------------------------------
+
+    def add_flag(
+        self,
+        case_id: str,
+        section_name: str,
+        flag_type: str,
+        severity: str,
+        message: str,
+    ) -> None:
+        """
+        Persist a flag (contradiction / critical_gap / warning).
+
+        Parameters
+        ----------
+        flag_type : "contradiction" | "critical_gap" | "warning"
+        severity  : "high" | "medium" | "low"
+        """
+        db = _get_db()
+        try:
+            db_case = self._require_case(db, case_id)
+            db.add(CaseFlag(
+                case_id=db_case.id,
+                flag_type=FlagType(flag_type),
+                severity=FlagSeverity(severity),
+                message=message,
+                section=section_name,
+            ))
+            db.commit()
+        finally:
+            db.close()
+
+    def get_unresolved_flags(
+        self, case_id: str, severity: Optional[str] = None
+    ) -> List[Dict]:
+        """Return all unresolved flags for a case, optionally filtered by severity."""
+        db = _get_db()
+        try:
+            db_case = self._require_case(db, case_id)
+            q = db.query(CaseFlag).filter(
+                CaseFlag.case_id == db_case.id,
+                CaseFlag.resolved == False,  # noqa: E712
+            )
+            if severity:
+                q = q.filter(CaseFlag.severity == FlagSeverity(severity))
+            return [f.to_dict() for f in q.all()]
+        finally:
+            db.close()
+
+    def resolve_flag(self, case_id: str, flag_id: int, note: str = "") -> bool:
+        """Mark a specific flag as resolved."""
+        db = _get_db()
+        try:
+            db_case = self._require_case(db, case_id)
+            flag = (
+                db.query(CaseFlag)
+                .filter(CaseFlag.id == flag_id, CaseFlag.case_id == db_case.id)
+                .first()
+            )
+            if not flag:
+                return False
+            flag.resolved = True
+            flag.resolved_at = datetime.utcnow()
+            flag.resolution_note = note
+            db.commit()
+            return True
+        finally:
+            db.close()
+
+    # ------------------------------------------------------------------
+    # DIFFERENTIALS
+    # ------------------------------------------------------------------
+
+    def add_differential(
+        self,
+        case_id: str,
+        working_diagnosis: str,
+        differentials: List[Dict],
+        point: str,
+    ) -> None:
+        """
+        Store a differential diagnosis snapshot.
+
+        Parameters
+        ----------
+        point : "after_history" | "after_examination"
+        differentials : [{"diagnosis": "...", "justification": "..."}, ...]
+        """
+        db = _get_db()
+        try:
+            db_case = self._require_case(db, case_id)
+            db.add(DifferentialDiagnosis(
+                case_id=db_case.id,
+                point=DifferentialPoint(point),
+                working_diagnosis=working_diagnosis,
+                differentials=differentials,
+            ))
+            db.commit()
+        finally:
+            db.close()
+
+    def get_latest_differential(self, case_id: str) -> Optional[Dict]:
+        db = _get_db()
+        try:
+            db_case = self._require_case(db, case_id)
+            dd = (
+                db.query(DifferentialDiagnosis)
+                .filter(DifferentialDiagnosis.case_id == db_case.id)
+                .order_by(DifferentialDiagnosis.created_at.desc())
+                .first()
+            )
+            return dd.to_dict() if dd else None
+        finally:
+            db.close()
+
+    def get_differential_history(self, case_id: str) -> List[Dict]:
+        db = _get_db()
+        try:
+            db_case = self._require_case(db, case_id)
+            rows = (
+                db.query(DifferentialDiagnosis)
+                .filter(DifferentialDiagnosis.case_id == db_case.id)
+                .order_by(DifferentialDiagnosis.created_at.asc())
+                .all()
+            )
+            return [r.to_dict() for r in rows]
+        finally:
+            db.close()
+
+    # ------------------------------------------------------------------
+    # PROGRESS
+    # ------------------------------------------------------------------
+
+    def get_progress(self, case_id: str) -> Dict:
+        """Return structured progress summary for a case."""
+        db = _get_db()
+        try:
+            db_case = self._require_case(db, case_id)
+            section_order = self.get_section_order(db_case.rotation)
+            total = len(section_order)
+            completed = len(db_case.completed_sections or [])
+
+            # Count sections with pending clarifications
+            pending_clarification_count = (
+                db.query(CaseSection)
+                .filter(
+                    CaseSection.case_id == db_case.id,
+                    CaseSection.status == SectionStatus.PENDING_CLARIFICATION,
+                )
+                .count()
+            )
+
+            section_breakdown = {}
+            for name in section_order:
+                sec = (
+                    db.query(CaseSection)
+                    .filter(
+                        CaseSection.case_id == db_case.id,
+                        CaseSection.section_name == name,
+                    )
+                    .first()
+                )
+                section_breakdown[name] = {
+                    "status": sec.status.value if sec else "not_started",
+                    "has_clarifications": bool(
+                        sec and sec.pending_clarifications
+                    ),
+                }
+
+            return {
+                "case_id": case_id,
+                "rotation": db_case.rotation,
+                "total_sections": total,
+                "completed_sections": completed,
+                "completion_percentage": (
+                    round((completed / total) * 100, 1) if total else 0
+                ),
+                "current_section": db_case.current_section,
+                "is_complete": db_case.is_complete,
+                "pending_clarifications": pending_clarification_count,
+                "section_breakdown": section_breakdown,
+            }
+        finally:
+            db.close()
+
+    # ------------------------------------------------------------------
+    # INTERNAL HELPERS
+    # ------------------------------------------------------------------
+
+    def _require_case(self, db, case_id: str) -> Case:
+        """Fetch a Case row or raise ValueError."""
+        db_case = db.query(Case).filter(Case.case_id == case_id).first()
+        if not db_case:
+            raise ValueError(f"Case not found: {case_id}")
+        return db_case
+
+    def _require_section(self, db, case_db_id: int, section_name: str) -> CaseSection:
+        """Fetch (or lazily create) a CaseSection row."""
+        section = (
+            db.query(CaseSection)
+            .filter(
+                CaseSection.case_id == case_db_id,
+                CaseSection.section_name == section_name,
+            )
+            .first()
+        )
+        if not section:
+            # Graceful fallback: create the row rather than crashing
+            section = CaseSection(
+                case_id=case_db_id,
+                section_name=section_name,
+                data={},
+                status=SectionStatus.NOT_STARTED,
+                pending_clarifications=[],
+            )
+            db.add(section)
+            db.flush()
+        return section
+
+    def _to_proxy(self, db_case: Case) -> Dict:
+        """
+        Convert a SQLAlchemy Case row into a plain dict.
+        Sections are included as a nested dict so index.py can
+        access case["sections"]["demographics"]["data"] etc.
+        """
+        sections_dict = {}
+        for sec in db_case.sections:
+            sections_dict[sec.section_name] = {
+                "section_name": sec.section_name,
+                "data": sec.data or {},
+                "status": sec.status.value,
+                "pending_clarifications": sec.pending_clarifications or [],
+            }
+
+        return {
+            "case_id": db_case.case_id,
+            "rotation": db_case.rotation,
+            "template_version": db_case.template_version,
+            "current_section": db_case.current_section,
+            "completed_sections": db_case.completed_sections or [],
+            "section_status": db_case.section_status or {},
+            "sections": sections_dict,
+            "is_complete": db_case.is_complete,
+            "created_at": db_case.created_at.isoformat() if db_case.created_at else None,
+            "last_updated": db_case.last_updated.isoformat() if db_case.last_updated else None,
+            "completed_at": db_case.completed_at.isoformat() if db_case.completed_at else None,
+        }
 
 
-_state_manager = None
+# ============================================================================
+# SINGLETON
+# ============================================================================
+
+_state_manager: Optional[StateManager] = None
 
 
 def get_state_manager() -> StateManager:
