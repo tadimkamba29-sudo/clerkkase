@@ -181,8 +181,9 @@ class StateManager:
             db.close()
 
     def delete_case(self, case_id: str) -> bool:
-        session = SessionLocal()  # <--- MAKE SURE THIS IS INDENTED!
+        session = SessionLocal()
         try:
+            # We must filter by Case.case_id (string), not Case.id (integer)
             case = session.query(Case).filter(Case.case_id == case_id).first()
             if not case:
                 print(f"Delete failed: Case {case_id} not found")
