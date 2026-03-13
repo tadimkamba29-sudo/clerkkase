@@ -16,46 +16,35 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# Default to /tmp so SQLite works on read-only filesystems (Vercel, etc.)
-_raw_url = os.getenv("DATABASE_URL", "sqlite:////tmp/clerkase.db")
-DB_ECHO         = os.getenv("DB_ECHO", "false").lower() == "true"
-DB_POOL_SIZE    = int(os.getenv("DB_POOL_SIZE", "5"))
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///clerkase.db")
+DB_ECHO = os.getenv("DB_ECHO", "false").lower() == "true"
+DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
 DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))
 
-
-def _normalise_url(url: str) -> str:
-    """
-    Rewrite DATABASE_URL so SQLAlchemy uses pg8000 (pure Python) instead of
-    psycopg2 for PostgreSQL connections.  Handles all common forms:
-      postgresql://...          -> postgresql+pg8000://...
-      postgres://...            -> postgresql+pg8000://...  (Heroku/Vercel)
-      postgresql+psycopg2://... -> postgresql+pg8000://...
-      sqlite:///...             -> unchanged
-    """
-    if url.startswith("postgres://"):
-        url = "postgresql" + url[len("postgres"):]
-    if url.startswith("postgresql://"):
-        url = "postgresql+pg8000" + url[len("postgresql"):]
-    elif url.startswith("postgresql+psycopg2://"):
-        url = "postgresql+pg8000" + url[len("postgresql+psycopg2"):]
-    return url
-
-
-DATABASE_URL = _normalise_url(_raw_url)
+# ✅ Fix 1: Vercel sometimes provides "postgres://" — SQLAlchemy needs "postgresql://"
+if DATABASE_URL.startswith("postgres://"):
+    DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         DATABASE_URL,
         echo=DB_ECHO,
-        connect_args={"check_same_thread": False},
+        connect_args={"check_same_thread": False}
     )
 else:
+    # ✅ Fix 2: Strip ?sslmode from URL and pass SSL via connect_args instead
+    connect_args = {}
+    if "sslmode=require" in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.replace("?sslmode=require", "").replace("&sslmode=require", "")
+        connect_args["sslmode"] = "require"
+
     engine = create_engine(
         DATABASE_URL,
         echo=DB_ECHO,
         pool_size=DB_POOL_SIZE,
         max_overflow=DB_MAX_OVERFLOW,
         pool_pre_ping=True,
+        connect_args=connect_args
     )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
