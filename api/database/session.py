@@ -1,56 +1,47 @@
 import os
-import ssl
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
-from urllib.parse import urlparse, parse_qs, urlencode, urlunparse
 from dotenv import load_dotenv
 
 load_dotenv()
 
 def _normalise_url(url):
     """
-    Cleans the DATABASE_URL for Vercel + pg8000 compatibility.
+    Cleans the DATABASE_URL for Vercel + Psycopg 3 compatibility.
+    1. Fixes postgres:// -> postgresql+psycopg://
+    2. Standardizes the prefix for SQLAlchemy 2.0
     """
     if not url or url.startswith("sqlite"):
         return url
 
-    # Force the driver to pg8000 (pure python, no binary issues)
+    # Force Psycopg 3 (the modern, robust driver)
     if url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql+pg8000://", 1)
+        url = url.replace("postgres://", "postgresql+psycopg://", 1)
     elif url.startswith("postgresql://"):
-        url = url.replace("postgresql://", "postgresql+pg8000://", 1)
-    elif "postgresql+pg8000" not in url:
-        url = url.replace("postgresql://", "postgresql+pg8000://", 1)
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+    elif "postgresql+psycopg" not in url:
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
+        
+    return url
 
-    # Strip 'sslmode' which pg8000 doesn't recognize as a URL parameter
-    u = urlparse(url)
-    query = parse_qs(u.query)
-    if 'sslmode' in query:
-        query.pop('sslmode')
-    
-    u = u._replace(query=urlencode(query, doseq=True))
-    return urlunparse(u)
-
-# Get URL and clean it
+# Get URL from environment
 RAW_URL = os.getenv("DATABASE_URL", "sqlite:////tmp/clerkase.db")
 DATABASE_URL = _normalise_url(RAW_URL)
 
-# Configure Engine
+# Configure the Engine
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False}
     )
 else:
-    # Use SSL context for pg8000
+    # Psycopg 3 handles sslmode=require in the URL automatically.
+    # We use pool_pre_ping to handle serverless connection drops.
     engine = create_engine(
         DATABASE_URL,
         pool_size=5,
         max_overflow=10,
-        pool_pre_ping=True,
-        connect_args={
-            "ssl_context": ssl.create_default_context()
-        }
+        pool_pre_ping=True
     )
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -64,11 +55,12 @@ def get_db():
         db.close()
 
 def init_db():
-    """Called by state_manager or index.py to setup tables."""
+    """Initializes the database tables."""
     try:
         from . import models
         Base.metadata.create_all(bind=engine)
+        print("✓ Database initialized successfully")
         return True
     except Exception as e:
-        print(f"Database init failed: {e}")
+        print(f"× Database initialization failed: {e}")
         return False

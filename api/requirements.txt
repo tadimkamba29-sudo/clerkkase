@@ -3,7 +3,7 @@ Flask-CORS==4.0.0
 python-dotenv==1.0.1
 SQLAlchemy==2.0.23
 alembic==1.13.1
-pg8000==1.31.2
+psycopg[binary]==3.1.18
 PyJWT==2.8.0
 bcrypt==4.1.2
 anthropic==0.18.1
