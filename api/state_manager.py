@@ -181,21 +181,25 @@ class StateManager:
             db.close()
 
     def delete_case(self, case_id: str) -> bool:
-        """Permanently delete a case and all related data."""
-        db = _get_db()
-        try:
-            db_case = db.query(Case).filter(Case.case_id == case_id).first()
-            if not db_case:
-                return False
-            db.delete(db_case)
-            db.commit()
-            return True
-        except Exception as e:
-            db.rollback()
-            print(f"Error deleting case {case_id}: {e}")
+    session = SessionLocal()
+    try:
+        # IMPORTANT: We must filter by Case.case_id (the string), 
+        # not Case.id (the integer)
+        case = session.query(Case).filter(Case.case_id == case_id).first()
+        if not case:
+            print(f"Delete failed: Case {case_id} not found")
             return False
-        finally:
-            db.close()
+            
+        session.delete(case)
+        session.commit()
+        print(f"✓ Case {case_id} deleted successfully")
+        return True
+    except Exception as e:
+        session.rollback()
+        print(f"Error deleting case: {e}")
+        return False
+    finally:
+        session.close()
 
     def get_all_cases(self) -> List[Dict]:
         """Return a summary list of all cases, most recently updated first."""
