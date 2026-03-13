@@ -9,14 +9,12 @@ load_dotenv()
 
 def _normalise_url(url):
     """
-    Cleans the DATABASE_URL for pg8000 compatibility.
-    1. Fixes postgres:// -> postgresql+pg8000://
-    2. Strips ?sslmode=... which pg8000 does not support as a keyword.
+    Cleans the DATABASE_URL for Vercel + pg8000 compatibility.
     """
     if not url or url.startswith("sqlite"):
         return url
 
-    # Handle the prefix
+    # Force the driver to pg8000 (pure python, no binary issues)
     if url.startswith("postgres://"):
         url = url.replace("postgres://", "postgresql+pg8000://", 1)
     elif url.startswith("postgresql://"):
@@ -24,30 +22,27 @@ def _normalise_url(url):
     elif "postgresql+pg8000" not in url:
         url = url.replace("postgresql://", "postgresql+pg8000://", 1)
 
-    # Parse the URL and strip 'sslmode' query parameter
+    # Strip 'sslmode' which pg8000 doesn't recognize as a URL parameter
     u = urlparse(url)
     query = parse_qs(u.query)
-    
-    # pg8000 fails if 'sslmode' is passed in the connection string
     if 'sslmode' in query:
         query.pop('sslmode')
     
-    # Rebuild the URL without the problematic sslmode
     u = u._replace(query=urlencode(query, doseq=True))
     return urlunparse(u)
 
-# Get and clean the URL
+# Get URL and clean it
 RAW_URL = os.getenv("DATABASE_URL", "sqlite:////tmp/clerkase.db")
 DATABASE_URL = _normalise_url(RAW_URL)
 
-# Configure the Engine
+# Configure Engine
 if DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         DATABASE_URL,
         connect_args={"check_same_thread": False}
     )
 else:
-    # pg8000 uses ssl_context instead of sslmode
+    # Use SSL context for pg8000
     engine = create_engine(
         DATABASE_URL,
         pool_size=5,
@@ -69,9 +64,11 @@ def get_db():
         db.close()
 
 def init_db():
+    """Called by state_manager or index.py to setup tables."""
     try:
         from . import models
         Base.metadata.create_all(bind=engine)
-        print("✓ Database initialized successfully")
+        return True
     except Exception as e:
-        print(f"× Database initialization failed: {e}")
+        print(f"Database init failed: {e}")
+        return False
