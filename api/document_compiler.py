@@ -39,7 +39,7 @@ class DocumentCompiler:
     def _ensure_output_dir(self):
         """Ensure output directory exists"""
         if not os.path.exists(self.output_dir):
-            os.makedirs(self.output_dir)
+            os.makedirs(self.output_dir, exist_ok=True)
     
     def _load_templates(self):
         """Load rotation templates"""
@@ -344,8 +344,7 @@ This is a brief summary. For the full clerking document, please export the compl
 _compiler = None
 
 
-def get_document_compiler(output_dir: str = "exports") -> DocumentCompiler:
-    """Get or create DocumentCompiler singleton"""
+def get_document_compiler(output_dir='/tmp/exports') -> DocumentCompiler:
     global _compiler
     if _compiler is None:
         _compiler = DocumentCompiler(output_dir)

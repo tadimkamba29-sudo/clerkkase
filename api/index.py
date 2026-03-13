@@ -39,7 +39,7 @@ CORS(app, resources={
 state_manager = get_state_manager()
 input_parser = get_input_parser()
 clarification_engine = get_clarification_engine(use_ai=True)
-document_compiler = get_document_compiler()
+document_compiler = get_document_compiler('/tmp/exports')
 
 
 # ============================================================================
