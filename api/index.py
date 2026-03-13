@@ -26,23 +26,54 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── App components ────────────────────────────────────────────────────────────
-from state_manager import get_state_manager
-from input_parser import get_input_parser
-from clarification_engine import get_clarification_engine
-from document_compiler import get_document_compiler
-from database import init_db, SessionLocal, User, SectionStatus
-from auth import (
-    hash_password,
-    verify_password,
-    validate_password_strength,
-    create_access_token,
-    create_refresh_token,
-    decode_token,
-    extract_bearer_token,
-    login_required,
-    optional_auth,
-)
+# ── App components — each import guarded so a missing package never prevents
+# the Flask app from starting. /api/health will report what failed.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_import_errors: dict = {}
+
+def _safe_import(name, stmt):
+    try:
+        ns = {}
+        exec(stmt, ns)
+        return ns
+    except Exception as e:
+        _import_errors[name] = str(e)
+        print(f"[ClerKase] IMPORT ERROR ({name}): {e}", flush=True)
+        return {}
+
+_db = _safe_import("database",
+    "from database import init_db, SessionLocal, User, SectionStatus")
+init_db       = _db.get("init_db")
+SessionLocal  = _db.get("SessionLocal")
+User          = _db.get("User")
+SectionStatus = _db.get("SectionStatus")
+
+_auth = _safe_import("auth",
+    "from auth import (hash_password, verify_password, validate_password_strength,"
+    " create_access_token, create_refresh_token, decode_token,"
+    " extract_bearer_token, login_required, optional_auth)")
+hash_password             = _auth.get("hash_password")
+verify_password           = _auth.get("verify_password")
+validate_password_strength = _auth.get("validate_password_strength")
+create_access_token       = _auth.get("create_access_token")
+create_refresh_token      = _auth.get("create_refresh_token")
+decode_token              = _auth.get("decode_token")
+extract_bearer_token      = _auth.get("extract_bearer_token")
+login_required            = _auth.get("login_required",
+                                lambda f: f)   # passthrough fallback
+optional_auth             = _auth.get("optional_auth",
+                                lambda f: f)   # passthrough fallback
+
+_sm  = _safe_import("state_manager",   "from state_manager import get_state_manager")
+_ip  = _safe_import("input_parser",    "from input_parser import get_input_parser")
+_ce  = _safe_import("clarification_engine", "from clarification_engine import get_clarification_engine")
+_dc  = _safe_import("document_compiler",    "from document_compiler import get_document_compiler")
+
+get_state_manager        = _sm.get("get_state_manager")
+get_input_parser         = _ip.get("get_input_parser")
+get_clarification_engine = _ce.get("get_clarification_engine")
+get_document_compiler    = _dc.get("get_document_compiler")
 
 # ── Flask setup ───────────────────────────────────────────────────────────────
 app = Flask(__name__)
@@ -122,12 +153,13 @@ def internal_error(error):
 
 @app.route("/api/health", methods=["GET"])
 def health_check():
-    status = "healthy" if not _init_errors else "degraded"
+    all_errors = {**_import_errors, **_init_errors}
+    status = "healthy" if not all_errors else "degraded"
     return jsonify({
         "status": status,
         "timestamp": datetime.utcnow().isoformat(),
         "version": "1.0.0",
-        "init_errors": _init_errors if _init_errors else None,
+        "errors": all_errors if all_errors else None,
     })
 
 
@@ -147,7 +179,7 @@ def system_status():
             "document_compiler": _comp(document_compiler),
         },
         "available_rotations": rotations,
-        "init_errors": _init_errors if _init_errors else None,
+        "init_errors": {**_import_errors, **_init_errors} or None,
     })
 
 
