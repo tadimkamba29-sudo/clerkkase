@@ -1,46 +1,106 @@
 """
-Input Parser for ClerKase
-Parses clinical input, extracts entities, and identifies SOCRATES pain
+Input Parser for ClerKase  (Batch 4 — upgraded)
+================================================
+
+Public API — **unchanged** from Kimi original so index.py needs no edits:
+  InputParser.parse(text, section_name)  → Dict
+  InputParser._extract_socrates_pain(text)  → SocratesPain | None
+  InputParser.check_completeness(text, section_name, template)  → List[str]
+  get_input_parser()  → InputParser singleton
+
+Internals replaced:
+  All heavy lifting is now delegated to ClinicalInputParser from
+  clinical_input_parser.py, which provides:
+    • 15-category symptom synonym map (negation-aware)
+    • Structured duration extraction (hours / days / weeks / months / years +
+      relative phrases like "since yesterday", "a few days")
+    • Full SOCRATES pain parser (site dict, character dict, radiation, NRS
+      severity, exacerbating/relieving factors)
+    • Age parser (years, years+months, months, weeks, days-old)
+    • Sex inference from pronouns / keywords
+    • Bulk-input detector (flags full clerking pastes)
+    • Unknown-token detector (spots medical suffixes not in dictionary)
 """
 
 import re
-from typing import Dict, List, Optional, Any, Tuple
-from dataclasses import dataclass
 from datetime import datetime
+from typing import Any, Dict, List, Optional, Tuple
+
+# ── Rich internal engine ─────────────────────────────────────────────────────
+from clinical_input_parser import (
+    ClinicalInputParser,
+    SOCRATESPain as _SOCRATESPain,
+    Symptom,
+    Duration,
+    parse_age,
+    parse_sex,
+    parse_socrates,
+    extract_duration,
+    extract_severity,
+    detect_bulk_input,
+)
+
+# ── Internal engine singleton ────────────────────────────────────────────────
+_ENGINE = ClinicalInputParser()
 
 
-@dataclass
-class ParsedEntity:
-    """A parsed entity from clinical input"""
-    entity_type: str
-    value: Any
-    confidence: float
-    position: Tuple[int, int]
+# ============================================================================
+# SocratesPain  — backwards-compatible dataclass
+# ============================================================================
 
-
-@dataclass
 class SocratesPain:
-    """SOCRATES pain assessment"""
-    site: Optional[str] = None
-    onset: Optional[str] = None
-    character: Optional[str] = None
-    radiation: Optional[str] = None
-    associations: Optional[str] = None
-    time_course: Optional[str] = None
-    exacerbating: Optional[str] = None
-    relieving: Optional[str] = None
-    severity: Optional[str] = None
-    
+    """
+    SOCRATES pain assessment.
+
+    Matches the interface expected by index.py:
+      .to_dict()   → Dict (includes is_complete key)
+      all nine fields as optional attributes
+    """
+
+    def __init__(self, rich: Optional[_SOCRATESPain] = None):
+        if rich is None:
+            self.site = None
+            self.onset = None
+            self.character = None
+            self.radiation = None
+            self.associations: Optional[str] = None
+            self.time_course = None
+            self.exacerbating: Optional[str] = None
+            self.relieving: Optional[str] = None
+            self.severity = None
+        else:
+            self.site = rich.site
+            self.onset = rich.onset
+            self.character = rich.character
+            self.radiation = rich.radiation
+
+            # associations: List[str] in rich model → join to string
+            self.associations = (
+                ", ".join(rich.associations) if rich.associations else None
+            )
+            self.time_course = rich.time_course
+
+            # exacerbating / relieving: List[str] → first item or None
+            self.exacerbating = (
+                rich.exacerbating_factors[0]
+                if rich.exacerbating_factors
+                else None
+            )
+            self.relieving = (
+                rich.relieving_factors[0]
+                if rich.relieving_factors
+                else None
+            )
+            self.severity = rich.severity
+
     def is_complete(self) -> bool:
-        """Check if all SOCRATES elements are present"""
         return all([
             self.site, self.onset, self.character, self.radiation,
             self.associations, self.time_course, self.exacerbating,
-            self.relieving, self.severity
+            self.relieving, self.severity,
         ])
-    
+
     def to_dict(self) -> Dict:
-        """Convert to dictionary"""
         return {
             "site": self.site,
             "onset": self.onset,
@@ -51,436 +111,327 @@ class SocratesPain:
             "exacerbating": self.exacerbating,
             "relieving": self.relieving,
             "severity": self.severity,
-            "is_complete": self.is_complete()
+            "is_complete": self.is_complete(),
         }
 
+
+# ============================================================================
+# InputParser
+# ============================================================================
 
 class InputParser:
     """
-    Parses clinical input text and extracts structured information
+    Parses clinical input text and extracts structured information.
+
+    Delegates all NLP work to ClinicalInputParser (clinical_input_parser.py).
     """
-    
-    # Common symptoms for pattern matching
-    SYMPTOM_PATTERNS = [
-        r'\b(pain|ache|discomfort|soreness)\b',
-        r'\b(fever|temperature)\b',
-        r'\b(cough|shortness of breath|dyspnoea)\b',
-        r'\b(nausea|vomiting|diarrhoea|constipation)\b',
-        r'\b(headache|dizziness|syncope)\b',
-        r'\b(rash|itching|swelling)\b',
-        r'\b(fatigue|tiredness|weakness)\b',
-        r'\b(loss of appetite|weight loss|weight gain)\b'
-    ]
-    
-    # Duration patterns
-    DURATION_PATTERNS = [
-        r'\b(\d+)\s*(day|days|d)\b',
-        r'\b(\d+)\s*(week|weeks|w)\b',
-        r'\b(\d+)\s*(month|months|m)\b',
-        r'\b(\d+)\s*(year|years|y)\b',
-        r'\b(\d+)\s*(hour|hours|hr|hrs)\b',
-        r'\b(\d+)\s*(minute|minutes|min|mins)\b',
-        r'\b(since|for)\s+(.+?)(?:\.|,|;|$)',
-    ]
-    
-    # Age patterns
-    AGE_PATTERNS = [
-        r'\b(\d+)\s*(?:year|yr)s?\s*old\b',
-        r'\bage\s*(?:of\s*)?(\d+)\b',
-        r'\b(\d+)[-\s]?(?:year|yr)[-\s]?old\b',
-        r'\b(\d+)\s*y\.?o\.?\b',
-    ]
-    
-    # Severity patterns
-    SEVERITY_PATTERNS = [
-        r'\b(\d+)/10\b',
-        r'\b(severe|moderate|mild)\s+(?:pain|discomfort)\b',
-        r'\bpain\s+(?:is\s+)?(severe|moderate|mild)\b',
-        r'\b(unbearable|excruciating|intense)\b',
-    ]
-    
-    # Medication patterns
-    MEDICATION_PATTERNS = [
-        r'\b(taking|on)\s+(.+?)(?:\.|,|;|$)',
-        r'\b(medications?|drugs?|tablets?)\s*:?\s*(.+?)(?:\.|,|;|$)',
-    ]
-    
-    # Allergy patterns
-    ALLERGY_PATTERNS = [
-        r'\ballerg(?:y|ic|ies)\s+(?:to\s+)?(.+?)(?:\.|,|;|$)',
-        r'\ballergic\s+to\s+(.+?)(?:\.|,|;|$)',
-    ]
-    
-    def __init__(self):
-        self._compile_patterns()
-    
-    def _compile_patterns(self):
-        """Compile regex patterns for efficiency"""
-        self._symptom_regex = [re.compile(p, re.IGNORECASE) for p in self.SYMPTOM_PATTERNS]
-        self._duration_regex = [re.compile(p, re.IGNORECASE) for p in self.DURATION_PATTERNS]
-        self._age_regex = [re.compile(p, re.IGNORECASE) for p in self.AGE_PATTERNS]
-        self._severity_regex = [re.compile(p, re.IGNORECASE) for p in self.SEVERITY_PATTERNS]
-        self._medication_regex = [re.compile(p, re.IGNORECASE) for p in self.MEDICATION_PATTERNS]
-        self._allergy_regex = [re.compile(p, re.IGNORECASE) for p in self.ALLERGY_PATTERNS]
-    
-    def parse(self, text: str, section_name: str) -> Dict[str, Any]:
+
+    # ── Public API ─────────────────────────────────────────────────────────
+
+    def parse(self, text: str, section_name: str = "general") -> Dict[str, Any]:
         """
-        Parse clinical input text
-        
+        Parse clinical input text.
+
         Args:
-            text: The input text to parse
-            section_name: The section being parsed
-            
+            text:         The input text to parse.
+            section_name: The section being parsed (used to gate which
+                          sub-parsers run, matching Kimi's original behaviour).
+
         Returns:
-            Dictionary with extracted entities and metadata
+            Dict with extracted entities and metadata.
         """
-        result = {
+        parsed = _ENGINE.parse(text)
+        rich_dict = _ENGINE.to_dict(parsed)
+
+        result: Dict[str, Any] = {
             "original_text": text,
             "section": section_name,
-            "entities": [],
-            "parsed_at": datetime.utcnow().isoformat()
+            "parsed_at": datetime.utcnow().isoformat(),
+            # ── Enriched fields from Claude's parser ──────────────────
+            "is_bulk_input": rich_dict["is_bulk_input"],
+            "detected_sections": rich_dict["detected_sections"],
+            "unknown_tokens": rich_dict["unknown_tokens"],
+            "age": rich_dict["age"],
+            "sex": rich_dict["sex"],
+            "duration_overall": rich_dict["duration_overall"],
+            "negated_symptoms": rich_dict["negated_symptoms"],
         }
-        
-        # Extract entities based on section
-        if section_name in ["presenting_complaint", "history_presenting_complaint"]:
-            result["symptoms"] = self._extract_symptoms(text)
-            result["duration"] = self._extract_duration(text)
-            result["severity"] = self._extract_severity(text)
-            result["socrates_pain"] = self._extract_socrates_pain(text)
-        
+
+        # ── Section-specific parsing (mirrors Kimi's gating) ──────────
+        if section_name in (
+            "presenting_complaint",
+            "history_presenting_complaint",
+            "history_presenting_illness",
+            "general",
+        ):
+            result["symptoms"] = self._symptoms_list(parsed.symptoms)
+            result["duration"] = self._duration_dict(parsed.duration_overall)
+            result["severity"] = self._severity_str(text)
+            result["socrates_pain"] = (
+                SocratesPain(parsed.pain).to_dict() if parsed.pain else None
+            )
+
         elif section_name == "demographics":
-            result["age"] = self._extract_age(text)
-        
+            result["age"] = rich_dict["age"]
+            result["sex"] = rich_dict["sex"]
+
         elif section_name == "drug_history":
             result["medications"] = self._extract_medications(text)
             result["allergies"] = self._extract_allergies(text)
-        
-        # Extract all entities
-        result["entities"] = self._extract_all_entities(text)
-        
+
+        else:
+            # For all other sections, still extract symptoms and duration
+            result["symptoms"] = self._symptoms_list(parsed.symptoms)
+            result["duration"] = self._duration_dict(parsed.duration_overall)
+
+        # ── Entity list (always present) ───────────────────────────────
+        result["entities"] = self._build_entities(parsed)
+
         return result
-    
-    def _extract_symptoms(self, text: str) -> List[Dict]:
-        """Extract symptoms from text"""
-        symptoms = []
-        
-        for pattern in self._symptom_regex:
-            matches = pattern.finditer(text)
-            for match in matches:
-                symptoms.append({
-                    "symptom": match.group(0),
-                    "position": (match.start(), match.end()),
-                    "context": text[max(0, match.start()-20):min(len(text), match.end()+20)]
-                })
-        
-        return symptoms
-    
-    def _extract_duration(self, text: str) -> Optional[Dict]:
-        """Extract duration information"""
-        for pattern in self._duration_regex:
-            match = pattern.search(text)
-            if match:
-                return {
-                    "value": match.group(0),
-                    "position": (match.start(), match.end())
-                }
-        return None
-    
-    def _extract_age(self, text: str) -> Optional[Dict]:
-        """Extract age information"""
-        for pattern in self._age_regex:
-            match = pattern.search(text)
-            if match:
-                age_value = match.group(1)
-                return {
-                    "value": int(age_value),
-                    "position": (match.start(), match.end())
-                }
-        return None
-    
-    def _extract_severity(self, text: str) -> Optional[Dict]:
-        """Extract severity information"""
-        for pattern in self._severity_regex:
-            match = pattern.search(text)
-            if match:
-                return {
-                    "value": match.group(0),
-                    "position": (match.start(), match.end())
-                }
-        return None
-    
-    def _extract_medications(self, text: str) -> List[Dict]:
-        """Extract medication information"""
-        medications = []
-        
-        for pattern in self._medication_regex:
-            matches = pattern.finditer(text)
-            for match in matches:
-                medications.append({
-                    "medication": match.group(0),
-                    "position": (match.start(), match.end())
-                })
-        
-        return medications
-    
-    def _extract_allergies(self, text: str) -> List[Dict]:
-        """Extract allergy information"""
-        allergies = []
-        
-        for pattern in self._allergy_regex:
-            matches = pattern.finditer(text)
-            for match in matches:
-                allergies.append({
-                    "allergen": match.group(1) if len(match.groups()) > 0 else match.group(0),
-                    "position": (match.start(), match.end())
-                })
-        
-        return allergies
-    
+
     def _extract_socrates_pain(self, text: str) -> Optional[SocratesPain]:
         """
-        Extract SOCRATES pain assessment from text
-        
-        SOCRATES:
-        - Site: Where is the pain?
-        - Onset: When did it start?
-        - Character: What is it like?
-        - Radiation: Does it go anywhere?
-        - Associations: Any other symptoms?
-        - Time course: Getting better/worse?
-        - Exacerbating: What makes it worse?
-        - Relieving: What makes it better?
-        - Severity: How bad is it?
+        Extract SOCRATES pain assessment.  Called directly by index.py's
+        /api/parse/socrates route.
+
+        Returns SocratesPain (with .to_dict()) or None if no pain present.
         """
-        pain = SocratesPain()
-        text_lower = text.lower()
-        
-        # Site patterns
-        site_patterns = [
-            r'(?:pain|ache)\s+(?:in|at)\s+(?:the\s+)?(.+?)(?:\.|,|;|$|\s+which)',
-            r'(.+?)\s+(?:pain|ache|discomfort)',
-            r'site\s*:?\s*(.+?)(?:\.|,|;|$)',
-            r'location\s*:?\s*(.+?)(?:\.|,|;|$)',
-        ]
-        for pattern in site_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                pain.site = match.group(1).strip().title()
-                break
-        
-        # Onset patterns
-        onset_patterns = [
-            r'(?:started|began|onset)\s+(?:on|at)?\s*(.+?)(?:\.|,|;|$)',
-            r'(?:for|since)\s+(.+?)(?:\.|,|;|$)',
-            r'onset\s*:?\s*(.+?)(?:\.|,|;|$)',
-        ]
-        for pattern in onset_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                pain.onset = match.group(1).strip().capitalize()
-                break
-        
-        # Character patterns
-        character_patterns = [
-            r'(?:described\s+as|like\s+a|character)\s+(.+?)(?:\.|,|;|$)',
-            r'\b(sharp|dull|aching|burning|stabbing|throbbing|cramping|colicky)\b',
-            r'character\s*:?\s*(.+?)(?:\.|,|;|$)',
-        ]
-        for pattern in character_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                pain.character = match.group(1).strip().capitalize()
-                break
-        
-        # Radiation patterns
-        radiation_patterns = [
-            r'(?:radiat|spread|move)\w*\s+(?:to|into|towards)\s+(.+?)(?:\.|,|;|$)',
-            r'radiation\s*:?\s*(.+?)(?:\.|,|;|$)',
-        ]
-        for pattern in radiation_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                pain.radiation = match.group(1).strip().capitalize()
-                break
-        
-        # Associations patterns
-        associations_patterns = [
-            r'(?:associated\s+with|along\s+with|also\s+has)\s+(.+?)(?:\.|,|;|$)',
-            r'associations\s*:?\s*(.+?)(?:\.|,|;|$)',
-        ]
-        for pattern in associations_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                pain.associations = match.group(1).strip().capitalize()
-                break
-        
-        # Time course patterns
-        time_patterns = [
-            r'(?:getting|becoming)\s+(better|worse|improving|deteriorating)',
-            r'(?:constant|intermittent|comes\s+and\s+goes)',
-            r'time\s+course\s*:?\s*(.+?)(?:\.|,|;|$)',
-        ]
-        for pattern in time_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                pain.time_course = match.group(0).strip().capitalize()
-                break
-        
-        # Exacerbating patterns
-        exacerbating_patterns = [
-            r'(?:worse\s+with|exacerbat\w+\s+by|triggered\s+by)\s+(.+?)(?:\.|,|;|$)',
-            r'exacerbating\s*:?\s*(.+?)(?:\.|,|;|$)',
-        ]
-        for pattern in exacerbating_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                pain.exacerbating = match.group(1).strip().capitalize()
-                break
-        
-        # Relieving patterns
-        relieving_patterns = [
-            r'(?:better\s+with|relieved\s+by|improved\s+with)\s+(.+?)(?:\.|,|;|$)',
-            r'relieving\s*:?\s*(.+?)(?:\.|,|;|$)',
-        ]
-        for pattern in relieving_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                pain.relieving = match.group(1).strip().capitalize()
-                break
-        
-        # Severity patterns
-        severity_patterns = [
-            r'\b(\d+)/10\b',
-            r'(?:severity|pain\s+is)\s*:?\s*(\d+)\s*/\s*10',
-            r'\b(severe|moderate|mild)\s+(?:pain|discomfort)',
-        ]
-        for pattern in severity_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                pain.severity = match.group(0).strip()
-                break
-        
-        # Return None if no pain information found
-        if not any([
-            pain.site, pain.onset, pain.character, pain.radiation,
-            pain.associations, pain.time_course, pain.exacerbating,
-            pain.relieving, pain.severity
-        ]):
+        rich = parse_socrates(text)
+        if rich is None:
             return None
-        
-        return pain
-    
-    def _extract_all_entities(self, text: str) -> List[ParsedEntity]:
-        """Extract all entities from text"""
-        entities = []
-        
-        # Extract symptoms
-        for pattern in self._symptom_regex:
-            for match in pattern.finditer(text):
-                entities.append(ParsedEntity(
-                    entity_type="symptom",
-                    value=match.group(0),
-                    confidence=0.8,
-                    position=(match.start(), match.end())
-                ))
-        
-        # Extract durations
-        for pattern in self._duration_regex:
-            for match in pattern.finditer(text):
-                entities.append(ParsedEntity(
-                    entity_type="duration",
-                    value=match.group(0),
-                    confidence=0.9,
-                    position=(match.start(), match.end())
-                ))
-        
-        # Extract age
-        for pattern in self._age_regex:
-            for match in pattern.finditer(text):
-                entities.append(ParsedEntity(
-                    entity_type="age",
-                    value=int(match.group(1)),
-                    confidence=0.95,
-                    position=(match.start(), match.end())
-                ))
-        
-        # Extract severity
-        for pattern in self._severity_regex:
-            for match in pattern.finditer(text):
-                entities.append(ParsedEntity(
-                    entity_type="severity",
-                    value=match.group(0),
-                    confidence=0.85,
-                    position=(match.start(), match.end())
-                ))
-        
-        # Convert to dicts for JSON serialization
-        return [
-            {
-                "entity_type": e.entity_type,
-                "value": e.value,
-                "confidence": e.confidence,
-                "position": e.position
-            }
-            for e in entities
-        ]
-    
-    def check_completeness(self, text: str, section_name: str, template: Dict) -> List[str]:
+        return SocratesPain(rich)
+
+    def check_completeness(
+        self,
+        text: str,
+        section_name: str,
+        template: Dict,
+    ) -> List[str]:
         """
-        Check if section input is complete based on template rules
-        
+        Check if section input is complete based on template rules.
+
         Args:
-            text: The input text
-            section_name: The section name
-            template: The rotation template
-            
+            text:         The input text.
+            section_name: The section name.
+            template:     The rotation template dict.
+
         Returns:
-            List of missing required fields
+            List of missing-field messages.
         """
-        missing = []
-        
+        missing: List[str] = []
+
         # Find section in template
         section_template = None
         for section in template.get("sections", []):
-            if section["name"] == section_name:
+            if section.get("name") == section_name:
                 section_template = section
                 break
-        
+
         if not section_template:
             return missing
-        
-        # Check clarification rules
-        rules = section_template.get("clarification_rules", {})
-        
-        for field, rule in rules.items():
-            # Check if field content is present
+
+        parsed = _ENGINE.parse(text)
+        rich_dict = _ENGINE.to_dict(parsed)
+
+        for field, rule in section_template.get("clarification_rules", {}).items():
+            message = rule.get("missing", f"Missing {field}")
+
             if field == "age":
-                if not self._extract_age(text):
-                    missing.append(rule.get("missing", f"Missing {field}"))
+                if not rich_dict["age"]:
+                    missing.append(message)
+
             elif field == "duration":
-                if not self._extract_duration(text):
-                    missing.append(rule.get("missing", f"Missing {field}"))
+                if not rich_dict["duration_overall"]:
+                    missing.append(message)
+
             elif field == "weight":
-                # Check for weight in text
-                weight_pattern = re.compile(r'\b(\d+(?:\.\d+)?)\s*(kg|kilos?|pounds?|lbs?)\b', re.IGNORECASE)
-                if not weight_pattern.search(text):
-                    missing.append(rule.get("missing", f"Missing {field}"))
+                weight_re = re.compile(
+                    r"\b(\d+(?:\.\d+)?)\s*(kg|kilos?|pounds?|lbs?)\b", re.I
+                )
+                if not weight_re.search(text):
+                    missing.append(message)
+
             elif field == "allergies":
                 if not self._extract_allergies(text):
-                    missing.append(rule.get("missing", f"Missing {field}"))
+                    missing.append(message)
+
             elif field == "pain_assessment":
                 if not self._extract_socrates_pain(text):
-                    missing.append(rule.get("missing", f"Missing {field}"))
-        
+                    missing.append(message)
+
+            elif field == "symptoms":
+                if not parsed.symptoms:
+                    missing.append(message)
+
         return missing
 
+    # ── Private helpers ────────────────────────────────────────────────────
 
-# Singleton instance
-_parser = None
+    @staticmethod
+    def _symptoms_list(symptoms: List[Symptom]) -> List[Dict]:
+        """Convert Symptom objects to JSON-serialisable dicts."""
+        result = []
+        for s in symptoms:
+            result.append({
+                "symptom": s.canonical_name,
+                "raw_text": s.raw_text,
+                "negated": s.negated,
+                "severity": s.severity,
+                "duration": (
+                    {"value": s.duration.value, "unit": s.duration.unit}
+                    if s.duration else None
+                ),
+                "qualifiers": s.qualifiers,
+            })
+        return result
+
+    @staticmethod
+    def _duration_dict(duration: Optional[Duration]) -> Optional[Dict]:
+        if not duration:
+            return None
+        return {
+            "value": duration.value,
+            "unit": duration.unit,
+            "display": str(duration),
+            "hours_equivalent": duration.to_hours(),
+        }
+
+    @staticmethod
+    def _severity_str(text: str) -> Optional[str]:
+        return extract_severity(text)
+
+    @staticmethod
+    def _extract_medications(text: str) -> List[Dict]:
+        """
+        Extract medication mentions from free text.
+        Handles patterns like:
+          "taking metformin 500mg", "on aspirin", "medications: ..."
+        """
+        meds: List[Dict] = []
+        patterns = [
+            re.compile(
+                r"\b(?:taking|on|prescribed?|started?|given|administering?)\s+"
+                r"([A-Za-z][\w\-]+(?:\s+\d+\s*(?:mg|g|mcg|ml))?)",
+                re.I,
+            ),
+            re.compile(
+                r"\bmedications?\s*:?\s*([A-Za-z][\w\s,\-]+?)(?:\.|;|$)",
+                re.I,
+            ),
+        ]
+        seen: set = set()
+        for pattern in patterns:
+            for m in pattern.finditer(text):
+                raw = m.group(1).strip()
+                if raw.lower() not in seen:
+                    seen.add(raw.lower())
+                    meds.append({
+                        "medication": raw,
+                        "position": (m.start(), m.end()),
+                    })
+        return meds
+
+    @staticmethod
+    def _extract_allergies(text: str) -> List[Dict]:
+        """
+        Extract allergy mentions from free text.
+        Handles: "allergic to penicillin", "allergy: latex", "NKDA"
+        """
+        allergies: List[Dict] = []
+
+        # "No known drug allergies / NKDA"
+        if re.search(r"\b(?:nkda|no\s+known\s+(?:drug\s+)?allerg)", text, re.I):
+            allergies.append({"allergen": "NKDA", "position": (0, 0)})
+            return allergies
+
+        patterns = [
+            re.compile(
+                r"\ballerg(?:y|ic|ies)\s+(?:to\s+)?([A-Za-z][\w\s\-]+?)"
+                r"(?:\s*(?:—|–|-{1,2}|:|\()\s*[A-Za-z].*?)?(?:\.|,|;|$)",
+                re.I,
+            ),
+            re.compile(
+                r"\ballergic\s+to\s+([A-Za-z][\w\s\-]+?)"
+                r"(?:\s*(?:—|–|-{1,2}|:|\()\s*[A-Za-z].*?)?(?:\.|,|;|$)",
+                re.I,
+            ),
+        ]
+        seen: set = set()
+        for pattern in patterns:
+            for m in pattern.finditer(text):
+                raw = m.group(1).strip().rstrip(".,;")
+                if raw.lower() not in seen:
+                    seen.add(raw.lower())
+                    allergies.append({
+                        "allergen": raw,
+                        "position": (m.start(), m.end()),
+                    })
+        return allergies
+
+    def _build_entities(self, parsed) -> List[Dict]:
+        """
+        Build a flat entity list (all types) matching Kimi's original format.
+        """
+        entities: List[Dict] = []
+
+        # Symptoms
+        for s in parsed.symptoms:
+            entities.append({
+                "entity_type": "symptom",
+                "value": s.canonical_name,
+                "raw": s.raw_text,
+                "negated": s.negated,
+                "confidence": 0.85,
+            })
+
+        # Duration
+        if parsed.duration_overall:
+            entities.append({
+                "entity_type": "duration",
+                "value": str(parsed.duration_overall),
+                "confidence": 0.9,
+            })
+
+        # Age
+        if parsed.age:
+            entities.append({
+                "entity_type": "age",
+                "value": parsed.age.get("display", ""),
+                "total_months": parsed.age.get("total_months"),
+                "confidence": 0.95,
+            })
+
+        # Sex
+        if parsed.sex:
+            entities.append({
+                "entity_type": "sex",
+                "value": parsed.sex,
+                "confidence": 0.8,
+            })
+
+        # Pain SOCRATES (summary)
+        if parsed.pain:
+            entities.append({
+                "entity_type": "pain",
+                "value": "socrates_assessed",
+                "site": parsed.pain.site,
+                "character": parsed.pain.character,
+                "severity": parsed.pain.severity,
+                "confidence": 0.9,
+            })
+
+        return entities
+
+
+# ============================================================================
+# Singleton
+# ============================================================================
+
+_parser: Optional[InputParser] = None
 
 
 def get_input_parser() -> InputParser:
-    """Get or create InputParser singleton"""
+    """Get or create the InputParser singleton."""
     global _parser
     if _parser is None:
         _parser = InputParser()
