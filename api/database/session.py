@@ -11,7 +11,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///clerkase.db")
+# Default to /tmp so SQLite works on read-only filesystems (Vercel, Railway, etc.)
+# For production set DATABASE_URL=postgresql://... in your environment variables.
+_default_sqlite = "sqlite:////tmp/clerkase.db"
+DATABASE_URL = os.getenv("DATABASE_URL", _default_sqlite)
 DB_ECHO = os.getenv("DB_ECHO", "false").lower() == "true"
 DB_POOL_SIZE = int(os.getenv("DB_POOL_SIZE", "5"))
 DB_MAX_OVERFLOW = int(os.getenv("DB_MAX_OVERFLOW", "10"))

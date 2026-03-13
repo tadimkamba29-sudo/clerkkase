@@ -57,10 +57,46 @@ CORS(app, resources={
 })
 
 # ── Initialise singletons ─────────────────────────────────────────────────────
-state_manager = get_state_manager()
-input_parser = get_input_parser()
-clarification_engine = get_clarification_engine(use_ai=True)
-document_compiler = get_document_compiler("/tmp/exports")
+# Each wrapped so a single failure (e.g. DB unreachable) doesn't kill every
+# route — /api/health and /api/rotations stay up even if the DB is down.
+
+_init_errors: dict = {}
+
+try:
+    state_manager = get_state_manager()
+except Exception as _e:
+    state_manager = None  # type: ignore[assignment]
+    _init_errors["state_manager"] = str(_e)
+    print(f"[ClerKase] ERROR: state_manager failed to initialise: {_e}", flush=True)
+
+try:
+    input_parser = get_input_parser()
+except Exception as _e:
+    input_parser = None  # type: ignore[assignment]
+    _init_errors["input_parser"] = str(_e)
+    print(f"[ClerKase] ERROR: input_parser failed to initialise: {_e}", flush=True)
+
+try:
+    clarification_engine = get_clarification_engine(use_ai=True)
+except Exception as _e:
+    clarification_engine = None  # type: ignore[assignment]
+    _init_errors["clarification_engine"] = str(_e)
+    print(f"[ClerKase] ERROR: clarification_engine failed to initialise: {_e}", flush=True)
+
+try:
+    document_compiler = get_document_compiler("/tmp/exports")
+except Exception as _e:
+    document_compiler = None  # type: ignore[assignment]
+    _init_errors["document_compiler"] = str(_e)
+    print(f"[ClerKase] ERROR: document_compiler failed to initialise: {_e}", flush=True)
+
+
+def _require(component, name: str):
+    """Return component or abort with 503 if it failed to initialise."""
+    if component is None:
+        from flask import abort
+        abort(503, description=f"{name} unavailable: {_init_errors.get(name, 'init error')}")
+    return component
 
 
 # ============================================================================
@@ -86,27 +122,32 @@ def internal_error(error):
 
 @app.route("/api/health", methods=["GET"])
 def health_check():
+    status = "healthy" if not _init_errors else "degraded"
     return jsonify({
-        "status": "healthy",
+        "status": status,
         "timestamp": datetime.utcnow().isoformat(),
         "version": "1.0.0",
+        "init_errors": _init_errors if _init_errors else None,
     })
 
 
 @app.route("/api/status", methods=["GET"])
 def system_status():
-    ai_status = clarification_engine.get_ai_status()
+    def _comp(c): return "active" if c is not None else "unavailable"
+    ai_status = clarification_engine.get_ai_status() if clarification_engine else "unavailable"
+    rotations = state_manager.get_available_rotations() if state_manager else []
     return jsonify({
-        "status": "operational",
+        "status": "operational" if not _init_errors else "degraded",
         "timestamp": datetime.utcnow().isoformat(),
         "components": {
-            "state_manager": "active",
-            "input_parser": "active",
-            "clarification_engine": "active",
+            "state_manager": _comp(state_manager),
+            "input_parser": _comp(input_parser),
+            "clarification_engine": _comp(clarification_engine),
             "ai_clarifier": ai_status,
-            "document_compiler": "active",
+            "document_compiler": _comp(document_compiler),
         },
-        "available_rotations": state_manager.get_available_rotations(),
+        "available_rotations": rotations,
+        "init_errors": _init_errors if _init_errors else None,
     })
 
 
@@ -272,7 +313,8 @@ def get_current_user():
 
 @app.route("/api/rotations", methods=["GET"])
 def get_rotations():
-    rotations = state_manager.get_available_rotations()
+    sm = _require(state_manager, "state_manager")
+    rotations = sm.get_available_rotations()
     rotation_list = []
     for rotation in rotations:
         template = state_manager.get_template(rotation)
@@ -288,7 +330,8 @@ def get_rotations():
 
 @app.route("/api/rotations/<rotation_id>", methods=["GET"])
 def get_rotation_detail(rotation_id):
-    template = state_manager.get_template(rotation_id)
+    sm = _require(state_manager, "state_manager")
+    template = sm.get_template(rotation_id)
     if not template:
         return jsonify({"error": "Rotation not found"}), 404
     sections = sorted(template.get("sections", []), key=lambda s: s.get("order", 999))
@@ -311,7 +354,8 @@ def get_rotation_detail(rotation_id):
 
 @app.route("/api/rotations/<rotation_id>/template", methods=["GET"])
 def get_rotation_template(rotation_id):
-    template = state_manager.get_template(rotation_id)
+    sm = _require(state_manager, "state_manager")
+    template = sm.get_template(rotation_id)
     if not template:
         return jsonify({"error": "Rotation not found"}), 404
     return jsonify(template)
@@ -319,7 +363,8 @@ def get_rotation_template(rotation_id):
 
 @app.route("/api/rotations/<rotation_id>/sections/<section_name>", methods=["GET"])
 def get_section_template(rotation_id, section_name):
-    template = state_manager.get_template(rotation_id)
+    sm = _require(state_manager, "state_manager")
+    template = sm.get_template(rotation_id)
     if not template:
         return jsonify({"error": "Rotation not found"}), 404
     for section in template.get("sections", []):
@@ -336,6 +381,7 @@ def get_section_template(rotation_id, section_name):
 @login_required
 def create_case():
     """Create a new clerking case (requires authentication)."""
+    sm = _require(state_manager, "state_manager")
     data = request.get_json()
     if not data:
         return jsonify({"error": "Request body required"}), 400
@@ -375,8 +421,9 @@ def list_cases():
     When authenticated returns only the caller's cases.
     When unauthenticated (dev/demo mode) returns all cases.
     """
+    sm = _require(state_manager, "state_manager")
     try:
-        cases = state_manager.get_all_cases()
+        cases = sm.get_all_cases()
 
         if g.current_user:
             user_id = g.current_user["user_id"]

@@ -62,7 +62,12 @@ class StateManager:
     def __init__(self):
         self._templates: Dict[str, Dict] = {}
         self._load_templates()
-        init_db()   # creates tables if they don't exist (idempotent)
+        try:
+            init_db()   # creates tables if they don't exist (idempotent)
+        except Exception as exc:
+            # Log but do NOT crash — routes that need the DB will fail individually.
+            # This keeps /api/health and /api/rotations (template-only) alive.
+            print(f"[ClerKase] WARNING: database init failed: {exc}", flush=True)
 
     # ------------------------------------------------------------------
     # TEMPLATE LOADING
